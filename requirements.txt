@@ -1,0 +1,8 @@
+# Dependency pipeline Kertas Emisi (GitHub Actions & lokal).
+# Tak ada eccodes/cfgrib: CAMS dikirim sebagai NetCDF, bukan GRIB.
+# Tak ada contourpy: isobar warisan Kertas Cuaca tidak dipakai di sini.
+numpy>=2.0
+xarray>=2024.1
+netCDF4>=1.6
+pillow>=10
+requests>=2.28

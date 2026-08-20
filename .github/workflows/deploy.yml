@@ -1,0 +1,75 @@
+name: Deploy Kertas Emisi
+
+# Jalankan pipeline GFS lalu publish frontend+data ke GitHub Pages.
+# Cron tiap 6 jam (menit :15). Bisa juga dipicu manual (workflow_dispatch).
+on:
+  push:
+    branches: [main]
+  schedule:
+    # 04:00 WIB = 21:00 UTC (hari sebelumnya). Sekali sehari.
+    - cron: "0 21 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # eccodes butuh pustaka C; wheel pip biasanya sudah membawa binernya,
+      # tapi pasang libeccodes0 sistem sebagai jaring pengaman.
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+
+      - name: Jalankan pipeline (unduh CAMS + render)
+        working-directory: backend/pipeline
+        env:
+          ADS_KEY: ${{ secrets.ADS_KEY }}
+        run: python run.py
+
+      - name: Assemble site (jaga struktur ../backend/data/output)
+        run: |
+          mkdir -p _site/frontend _site/backend/data/output
+          cp -r frontend/. _site/frontend/
+          cp -r backend/data/output/. _site/backend/data/output/
+          cat > _site/index.html <<'HTML'
+          <!doctype html><meta charset="utf-8">
+          <title>Kertas Emisi — Peta kualitas udara interaktif Indonesia</title>
+          <meta http-equiv="refresh" content="0; url=./frontend/index.html">
+          <meta property="og:type" content="website">
+          <meta property="og:site_name" content="Kertas Emisi">
+          <meta property="og:title" content="Kertas Emisi — Peta kualitas udara interaktif Indonesia">
+          <meta property="og:description" content="Angin, hujan, suhu, awan, dan tekanan untuk seluruh Indonesia. Klik lokasimu untuk prakiraan detail per jam.">
+          <meta property="og:url" content="https://bungakertas-py.github.io/kertas-emisi/">
+          <meta property="og:image" content="https://bungakertas-py.github.io/kertas-emisi/frontend/og-image.png">
+          <meta name="twitter:card" content="summary_large_image">
+          <meta name="twitter:image" content="https://bungakertas-py.github.io/kertas-emisi/frontend/og-image.png">
+          <a href="./frontend/index.html">Buka Kertas Cuaca</a>
+          HTML
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
