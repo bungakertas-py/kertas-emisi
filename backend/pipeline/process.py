@@ -17,9 +17,11 @@ from pathlib import Path
 
 import numpy as np
 import xarray as xr
-from PIL import Image
+from PIL import Image, ImageDraw
 
-from config import BACKEND_DIR, LAYERS, OUTPUT_DIR, REGION
+from config import (BACKEND_DIR, BMUA_24JAM, DT_PARAM, HARI_PER_TAHUN, ISPU_MAKS,
+                    ISPU_PARAM, ISPU_SIMPUL, ISPU_TABEL, LAYERS, OUTPUT_DIR,
+                    RADIUS_BUMI, REGION, UG_PER_TON)
 
 warnings.filterwarnings("ignore", message="Ignoring index file")
 
@@ -149,34 +151,347 @@ _CIN_SCALE = [
 ]
 
 
-# Palet polutan. SATU ramp warna dipakai untuk semua parameter (bening -> hijau ->
-# kuning -> oranye -> merah -> ungu), cuma ambangnya yang beda. Ini disengaja: warna
-# yang sama berarti tingkat bahaya yang sama, jadi mata tak perlu belajar ulang tiap
-# ganti parameter. Ambangnya mengacu ISPU (Permen LHK 14/2020) dan pedoman WHO 2021.
-_RAMP = [(0x35, 0xc8, 0x4a, 90), (0xea, 0xd8, 0x21, 170), (0xf2, 0x70, 0x1c, 210),
-         (0xe4, 0x23, 0x20, 232), (0x8a, 0x29, 0xc8, 246)]
+# Palet polutan. Tiap parameter punya KELUARGA WARNA SENDIRI, pilihan user, diambil
+# dari colormap matplotlib lalu dibekukan jadi 5 hentian di sini. Dibekukan supaya
+# matplotlib tak perlu ikut terpasang di CI cuma demi tujuh daftar warna.
+#
+# Alasan tiap parameter beda: satu parameter satu identitas warna, jadi pengguna tahu
+# sedang melihat apa tanpa membaca label. Yang menyatukan makna tetap ada di layer
+# ISPU, dan di situ warnanya justru mengikuti Lampiran II Permen LHK 14/2020.
+# Ambang tiap parameter mengacu ISPU dan pedoman WHO 2021.
+#
+# Hentian diambil di posisi 0,20 sampai 1,00 pada colormap aslinya. Ujung paling
+# pucat dilewati karena nyaris putih dan tak terbaca sebagai warna ambang.
+_PALET = {
+    "pm25": [(0xfe, 0xe1, 0x87), (0xfe, 0xab, 0x49), (0xfc, 0x5b, 0x2e), (0xd4, 0x10, 0x20), (0x80, 0x00, 0x26)],   # YlOrRd
+    "pm10": [(0xfe, 0xeb, 0xa2), (0xfe, 0xbb, 0x47), (0xf0, 0x78, 0x18), (0xb8, 0x42, 0x03), (0x66, 0x25, 0x06)],   # YlOrBr, krem ke coklat tua
+    "co":   [(0xfc, 0xd0, 0xcc), (0xf9, 0x94, 0xb1), (0xe2, 0x3e, 0x99), (0x99, 0x01, 0x7b), (0x49, 0x00, 0x6a)],   # RdPu
+    "no2":  [(0xe2, 0xe2, 0xef), (0xb6, 0xb6, 0xd8), (0x86, 0x83, 0xbd), (0x61, 0x40, 0x9b), (0x3f, 0x00, 0x7d)],   # Purples
+    "so2":  [(0xe5, 0xf5, 0xac), (0xa2, 0xd8, 0x8a), (0x4c, 0xb0, 0x63), (0x15, 0x79, 0x3e), (0x00, 0x45, 0x29)],   # YlGn
+    "o3":   [(0xff, 0x99, 0x33), (0xe5, 0x33, 0x00), (0x99, 0x00, 0x00), (0x4c, 0x00, 0x00), (0x00, 0x00, 0x00)],   # gist_heat dibalik
+    "aod":  [(0xfc, 0x9f, 0x65), (0xbd, 0x78, 0x4c), (0x7e, 0x50, 0x33), (0x3f, 0x28, 0x19), (0x00, 0x00, 0x00)],   # copper dibalik
+}
+# Kepekatan naik bersama ambang: yang rendah setengah tembus supaya peta di bawahnya
+# masih terbaca, yang tinggi hampir pejal supaya menonjol.
+_ALPHA = [90, 170, 210, 232, 246]
 
 
-def _skala(bening, ambang):
+def _skala(bening, ambang, palet):
     """Bangun skala warna: transparan penuh sampai `bening`, lalu ramp di `ambang`."""
-    out = [(0, (0x14, 0x37, 0x8f, 0)), (bening, (0x35, 0xc8, 0x4a, 0))]
-    return out + [(v, c) for v, c in zip(ambang, _RAMP)]
+    out = [(0, (0x14, 0x37, 0x8f, 0)), (bening, (*palet[0], 0))]
+    return out + [(v, (*c, a)) for v, c, a in zip(ambang, palet, _ALPHA)]
 
 
 # PM2.5: ISPU 15,5 baik | 55,4 sedang | 150,4 tidak sehat | 250,4 sangat tidak sehat
-_PM25_SCALE = _skala(5, [15.5, 55.4, 150.4, 250.4, 400])
+_PM25_SCALE = _skala(5, [15.5, 55.4, 150.4, 250.4, 400], _PALET["pm25"])
 # PM10: ISPU 50 | 150 | 350 | 420
-_PM10_SCALE = _skala(15, [50, 150, 350, 420, 600])
+_PM10_SCALE = _skala(15, [50, 150, 350, 420, 600], _PALET["pm10"])
 # CO: latar global ~100-200 ug/m3, kota bisa ribuan
-_CO_SCALE = _skala(200, [500, 1000, 2000, 4000, 8000])
+_CO_SCALE = _skala(200, [500, 1000, 2000, 4000, 8000], _PALET["co"])
 # NO2: pedoman WHO 24 jam = 25 ug/m3
-_NO2_SCALE = _skala(2, [10, 25, 50, 100, 200])
+_NO2_SCALE = _skala(2, [10, 25, 50, 100, 200], _PALET["no2"])
 # SO2: pedoman WHO 24 jam = 40 ug/m3
-_SO2_SCALE = _skala(2, [10, 40, 80, 200, 400])
+_SO2_SCALE = _skala(2, [10, 40, 80, 200, 400], _PALET["so2"])
 # O3: pedoman WHO 8 jam = 100 ug/m3
-_O3_SCALE = _skala(20, [60, 100, 140, 180, 240])
+_O3_SCALE = _skala(20, [60, 100, 140, 180, 240], _PALET["o3"])
 # AOD 550 nm: tanpa satuan. 0,2 berkabut tipis, di atas 1 asap tebal
-_AOD_SCALE = _skala(0.05, [0.2, 0.5, 1.0, 2.0, 3.0])
+_AOD_SCALE = _skala(0.05, [0.2, 0.5, 1.0, 2.0, 3.0], _PALET["aod"])
+
+
+# Tinggi lapisan batas (PBL). Skalanya TERBALIK dari semua layer lain: yang
+# mengkhawatirkan justru nilai RENDAH, karena lapisan aduk yang tipis mengurung
+# emisi di dekat tanah. Jadi yang menyala warna panas adalah yang rendah, dan yang
+# tinggi dibiarkan bening karena berarti udaranya lega dan tak perlu ditandai.
+_PBL_WARNA = [(0xd7, 0x19, 0x1c), (0xf4, 0x6d, 0x43), (0xfd, 0xae, 0x61),
+              (0xfe, 0xe0, 0x8b), (0xff, 0xff, 0xbf)]
+_PBL_ALPHA = [235, 205, 170, 130, 70]
+_PBL_AMBANG = [200, 400, 700, 1000, 1500]   # meter
+
+
+def _skala_terbalik(ambang, palet, alpha, pudar):
+    """Skala yang pekat di nilai RENDAH lalu memudar ke atas."""
+    out = [(0, (*palet[0], alpha[0]))]
+    out += [(v, (*c, a)) for v, c, a in zip(ambang, palet, alpha)]
+    out += [(pudar, (*palet[-1], 0))]
+    return out
+
+
+_PBL_SCALE = _skala_terbalik(_PBL_AMBANG, _PBL_WARNA, _PBL_ALPHA, 2500)
+
+
+# ============ PROYEKSI: baris pratinjau harus MERCATOR, bukan lintang ============
+# Leaflet menempatkan imageOverlay dengan merentangkan bitmap LINEAR di layar, dan
+# layar itu Web Mercator. Kalau barisnya kita susun linear terhadap lintang
+# (equirectangular), gambar melenceng sampai 81 km di lintang 20 dan 50 km di
+# lintang 8. Lebih dari satu sel grid, dan paling parah persis di lintang Jawa
+# sampai Maluku. Jadi baris pratinjau disusun linear di Mercator sejak dari sini.
+#
+# Batas gambar juga dipakai TEPI sel, bukan pusat sel. Pratinjau berisi `nx` blok
+# yang masing-masing mewakili satu sel penuh; menempatkannya di kotak pusat-ke-pusat
+# menggeser semuanya setengah sel di tepi domain.
+
+
+def _merc(lat_deg):
+    lat = np.clip(np.asarray(lat_deg, dtype="f8"), -85.05, 85.05)
+    return np.log(np.tan(np.radians(45.0 + lat / 2.0)))
+
+
+def _merc_balik(y):
+    return np.degrees(2.0 * np.arctan(np.exp(np.asarray(y, dtype="f8"))) - np.pi / 2.0)
+
+
+def tepi_gambar(grid: dict) -> tuple[float, float, float, float]:
+    """Kotak TEPI sel: (barat, timur, selatan, utara). Ini yang dipakai frontend
+    untuk menempatkan pratinjau, bukan kotak pusat-ke-pusat."""
+    nx, ny = grid["width"], grid["height"]
+    dlon = (grid["east"] - grid["west"]) / (nx - 1) if nx > 1 else 0.4
+    dlat = (grid["north"] - grid["south"]) / (ny - 1) if ny > 1 else 0.4
+    return (grid["west"] - dlon / 2, grid["east"] + dlon / 2,
+            grid["south"] - dlat / 2, grid["north"] + dlat / 2)
+
+
+def _baris_sumber(grid: dict, skala: int) -> np.ndarray:
+    """Untuk tiap baris keluaran, indeks baris SUMBER (pecahan) yang benar menurut
+    Mercator. Panjangnya height*skala."""
+    ny = grid["height"]
+    _, _, sel, uta = tepi_gambar(grid)
+    dlat = (grid["north"] - grid["south"]) / (ny - 1) if ny > 1 else 0.4
+    H = ny * skala
+    yU, yS = float(_merc(uta)), float(_merc(sel))
+    y = yU + ((np.arange(H) + 0.5) / H) * (yS - yU)
+    phi = _merc_balik(y)
+    return np.clip((grid["north"] - phi) / dlat, 0, ny - 1)
+
+
+def _batas_baris(grid: dict, skala: int) -> np.ndarray:
+    """Baris keluaran tempat BATAS antar sel jatuh (untuk garis kisi)."""
+    ny = grid["height"]
+    _, _, sel, uta = tepi_gambar(grid)
+    dlat = (grid["north"] - grid["south"]) / (ny - 1) if ny > 1 else 0.4
+    H = ny * skala
+    yU, yS = float(_merc(uta)), float(_merc(sel))
+    tepi_lat = grid["north"] + dlat / 2 - np.arange(ny + 1) * dlat
+    baris = (_merc(tepi_lat) - yU) / (yS - yU) * H
+    return np.unique(np.clip(np.round(baris), 0, H - 1).astype(int))
+
+
+def _proyeksi_mercator(rgba: np.ndarray, grid: dict, skala: int,
+                       kategori: bool) -> np.ndarray:
+    """Perbesar `skala` kali: kolom linear di bujur, BARIS linear di Mercator.
+
+    Layer KATEGORI digandakan apa adanya (kotak tegas). Layer MENERUS dihaluskan
+    di KEDUA arah: mendatar lewat resize bilinear, tegak lewat pembauran antar
+    baris sumber. Menggandakan kolom apa adanya untuk layer menerus membuat
+    heatmap yang tadinya mulus jadi kotak-kotak."""
+    r = _baris_sumber(grid, skala)
+    if kategori:
+        lebar = np.repeat(rgba, skala, axis=1)          # bujur memang linear
+        return lebar[np.round(r).astype(int)]
+    lebar = np.asarray(Image.fromarray(rgba, mode="RGBA").resize(
+        (rgba.shape[1] * skala, rgba.shape[0]), Image.BILINEAR)).astype("f4")
+    i0 = np.floor(r).astype(int)
+    i1 = np.minimum(i0 + 1, grid["height"] - 1)
+    t = (r - i0)[:, None, None]
+    return (lebar[i0] * (1 - t) + lebar[i1] * t).round().astype("uint8")
+
+
+def _skala_tangga(batas, warna):
+    """Skala warna bertangga, tanpa gradasi antar kategori."""
+    eps = 1e-3
+    out = []
+    for k, warna_k in enumerate(warna):
+        lo, hi = batas[k], batas[k + 1]
+        out.append((lo, warna_k))
+        out.append((hi - eps, warna_k))
+    out.append((batas[-1], warna[-1]))
+    return out
+
+
+# ============ DAYA TAMPUNG UDARA (Permen LH No. 5) ============
+# Volume udara acuan untuk menetapkan AMBANG kategori: satu sel grid di lintang
+# rendah (~1.950 km2) dengan PBLH 700 m. Dari situ lahir R = beban emisi maksimum
+# di sel acuan, dan ambang kategorinya dinyatakan sebagai kelipatan R. Cara ini
+# dipakai supaya ambangnya ikut menyesuaikan BMUA tiap parameter, bukan angka
+# yang dikarang satu-satu.
+#
+# PENTING, ambang kategori ini TIDAK ADA di peraturan. Permen LH 5 hanya memberi
+# rumusnya, tak menggolongkan hasilnya. Yang bersandar pada aturan cuma batas
+# NOL (beban maksimum terlampaui atau belum); sisanya pembagian buatan sendiri
+# untuk keperluan peta, dan itu ditulis terbuka di UI.
+_DT_LUAS_ACUAN = 1.95e9      # m2
+_DT_PBLH_ACUAN = 700.0       # m
+_DT_WARNA = [
+    (0xa5, 0x00, 0x26, 235),   # terlampaui berat  (DT < -R)
+    (0xf4, 0x6d, 0x43, 225),   # terlampaui        (-R .. 0)
+    (0xfe, 0xe0, 0x8b, 215),   # menipis           (0 .. 0,25R)
+    (0xa6, 0xd9, 0x6a, 205),   # cukup             (0,25R .. 0,6R)
+    (0x1a, 0x98, 0x50, 200),   # lega              (> 0,6R)
+]
+
+
+def dt_acuan(par: str) -> float:
+    """R, beban emisi maksimum di sel acuan, ton/tahun."""
+    return (_DT_LUAS_ACUAN * _DT_PBLH_ACUAN * BMUA_24JAM[par]
+            / UG_PER_TON * HARI_PER_TAHUN)
+
+
+def dt_ambang(par: str) -> list[float]:
+    """Empat batas kategori daya tampung (ton/tahun), dibulatkan ke ribuan."""
+    R = dt_acuan(par)
+    return [round(f * R / 1000) * 1000 for f in (-1.0, 0.0, 0.25, 0.6)]
+
+
+_DT_SCALES = {}
+for _par in DT_PARAM:
+    _b = dt_ambang(_par)
+    _R = dt_acuan(_par)
+    _DT_SCALES[f"dt_{_par}"] = _skala_tangga([-20 * _R] + _b + [20 * _R], _DT_WARNA)
+
+
+def luas_sel(grid: dict) -> np.ndarray:
+    """Luas tiap sel grid dalam m2, dihitung di bola.
+
+    Tak boleh dianggap seragam: sel 0,4 derajat itu 1.978 km2 di ekuator tapi
+    tinggal 1.713 km2 di lintang 30, selisihnya 13 persen dan langsung merambat
+    ke angka ton/tahun."""
+    ny, nx = grid["height"], grid["width"]
+    lat = np.linspace(grid["north"], grid["south"], ny)      # baris-0 = utara
+    dlat = abs(lat[1] - lat[0]) if ny > 1 else 0.4
+    dlon = abs(grid["east"] - grid["west"]) / (nx - 1) if nx > 1 else 0.4
+    atas = np.radians(np.minimum(lat + dlat / 2, 90.0))
+    bawah = np.radians(np.maximum(lat - dlat / 2, -90.0))
+    pita = RADIUS_BUMI ** 2 * np.radians(dlon) * (np.sin(atas) - np.sin(bawah))
+    return np.repeat(pita[:, None], nx, axis=1)
+
+
+def hitung_daya_tampung(par: str, c24: np.ndarray, pblh24: np.ndarray,
+                        luas_darat: np.ndarray) -> np.ndarray:
+    """Daya tampung satu parameter, ton/tahun. NaN di sel tanpa daratan.
+
+    V = A x PBLH, BEmax = V x BMUA, BEeks = V x C, DT = BEmax - BEeks, lalu
+    disetahunkan. Karena BEmax dan BEeks berbagi V yang sama, DT bisa ditulis
+    ringkas sebagai V x (BMUA - C)."""
+    V = luas_darat * pblh24
+    dt = V * (BMUA_24JAM[par] - c24) / UG_PER_TON * HARI_PER_TAHUN
+    return np.where(luas_darat > 0, dt, np.nan)
+
+
+# ---- Topeng daratan untuk memotong tampilan mengikuti garis pantai ----
+# DUA berkas, dan itu bukan pilihan gaya. Frontend menggambar garis pantai
+# Indonesia dari idn_provinces (18.904 titik), sedangkan world_countries cuma
+# punya 3.087 titik untuk Indonesia, enam kali lebih kasar. Memotong dengan yang
+# kasar sementara yang digambar yang halus membuat potongannya meleset dari
+# garis pantai yang terlihat. Jadi keduanya digabung.
+_GEO_DARAT = [
+    BACKEND_DIR.parent / "frontend" / "data" / "world_countries.geojson",
+    BACKEND_DIR.parent / "frontend" / "data" / "idn_provinces.geojson",
+]
+# Oversampling topeng sebelum diperkecil. Tepi pantai jadi ber-alpha pecahan,
+# bukan tangga keras, jadi potongannya terbaca mulus walau petanya di-zoom.
+_TOPENG_HALUS = 4
+_topeng_cache: dict = {}
+
+
+def topeng_darat(grid: dict, skala: int) -> np.ndarray:
+    """Pecahan daratan tiap piksel pratinjau (float 0..1).
+
+    Dirasterkan dari poligon garis pantai, bukan dari kotak grid, supaya tepi
+    layer mengikuti lekuk pantai. Dirasterkan `_TOPENG_HALUS` kali lebih rapat
+    dari pratinjau lalu dirata-rata turun, jadi tepinya ber-antialias."""
+    kunci = (grid["west"], grid["east"], grid["south"], grid["north"],
+             grid["width"], grid["height"], skala)
+    if kunci in _topeng_cache:
+        return _topeng_cache[kunci]
+    o = _TOPENG_HALUS
+    W, H = grid["width"] * skala, grid["height"] * skala
+    Wo, Ho = W * o, H * o
+    img = Image.new("1", (Wo, Ho), 0)
+    gambar = ImageDraw.Draw(img)
+    bar, tim, sel, uta = tepi_gambar(grid)
+    yU, yS = float(_merc(uta)), float(_merc(sel))
+    sx = Wo / (tim - bar)
+    sy = Ho / (yS - yU)
+
+    def piksel(cincin):
+        # Sumbu tegak WAJIB Mercator, sama dengan cara pratinjau disusun. Kalau di
+        # sini linear terhadap lintang, topengnya meleset puluhan km dari datanya.
+        return [((x - bar) * sx, (float(_merc(y)) - yU) * sy) for x, y in cincin]
+
+    def poligon(p, isi):
+        if not p:
+            return
+        gambar.polygon(piksel(p[0]), fill=isi)
+        if isi:                                # lubang cuma berlaku saat mengisi
+            for lubang in p[1:]:               # danau di dalam daratan
+                gambar.polygon(piksel(lubang), fill=0)
+
+    for berkas in _GEO_DARAT:
+        if not berkas.exists():
+            continue
+        data = json.loads(berkas.read_text(encoding="utf-8"))
+        for fitur in data.get("features", []):
+            g = fitur.get("geometry") or {}
+            if g.get("type") == "Polygon":
+                poligon(g["coordinates"], 1)
+            elif g.get("type") == "MultiPolygon":
+                for p in g["coordinates"]:
+                    poligon(p, 1)
+    kasar = np.asarray(img, dtype="f4")
+    hasil = kasar.reshape(H, o, W, o).mean(axis=(1, 3))     # rata-rata luas -> antialias
+    _topeng_cache[kunci] = hasil
+    return hasil
+
+
+# ISPU. Warnanya BUKAN ramp di atas, melainkan lima warna resmi Lampiran II Permen
+# LHK 14/2020: hijau, biru, kuning, merah, hitam. Sengaja menyimpang dari aturan
+# "satu ramp untuk semua", karena warna ISPU sudah punya arti hukum dan orang yang
+# kenal ISPU dari BMKG akan membacanya lewat warna itu.
+#
+# Batasnya TEGAS, bukan gradasi. Kategori ISPU itu diskret, memuluskannya bikin
+# batas kategori kabur dan orang salah baca. Trik untuk memaksa tangga di
+# _scalar_to_rgba yang berinterpolasi linear: taruh dua simpul rapat di tiap batas.
+_ISPU_WARNA = [
+    (0x35, 0xc8, 0x4a, 165),   # Baik
+    (0x2b, 0x83, 0xba, 180),   # Sedang
+    (0xea, 0xd8, 0x21, 205),   # Tidak Sehat
+    (0xe4, 0x23, 0x20, 228),   # Sangat Tidak Sehat
+    (0x0d, 0x0d, 0x0d, 242),   # Berbahaya
+]
+_ISPU_BATAS = [0, 50, 100, 200, 300, ISPU_MAKS]
+
+
+_ISPU_SCALE = _skala_tangga(_ISPU_BATAS, _ISPU_WARNA)
+
+
+def subindeks_ispu(par: str, x: np.ndarray) -> np.ndarray:
+    """Konsentrasi rata 24 jam (ug/m3) -> nilai ISPU parameter itu.
+
+    Interpolasi linear antar simpul tabel Lampiran I.A, persis rumus Lampiran I.B.
+    Di atas baris terakhir tabel, kemiringan pita terakhir diteruskan lalu dipotong
+    di ISPU_MAKS; aturan tak mengatur wilayah itu."""
+    X = ISPU_TABEL[par]
+    y = np.interp(x, X, ISPU_SIMPUL)          # np.interp memotong di ujung
+    atas = X[-1]
+    lewat = x > atas
+    if lewat.any():
+        kemiringan = (ISPU_SIMPUL[-1] - ISPU_SIMPUL[-2]) / (atas - X[-2])
+        y = np.where(lewat, ISPU_SIMPUL[-1] + (x - atas) * kemiringan, y)
+    return np.clip(y, 0, ISPU_MAKS)
+
+
+def hitung_ispu(rata: dict) -> tuple[np.ndarray, np.ndarray]:
+    """ISPU akhir + kode pencemar kritis, dari rata-rata 24 jam per parameter.
+
+    Aturannya ISPU = nilai TERTINGGI di antara parameter, dan parameter penyebabnya
+    dilaporkan sebagai pencemar kritis. Jadi ini maksimum, bukan rata-rata.
+    `rata` = {parameter: array rata 24 jam}. Kode kritis = indeks di ISPU_PARAM."""
+    pakai = [p for p in ISPU_PARAM if p in rata]
+    tumpuk = np.stack([subindeks_ispu(p, rata[p]) for p in pakai])   # (npar, ny, nx)
+    kritis_lokal = np.argmax(tumpuk, axis=0)
+    ispu = np.take_along_axis(tumpuk, kritis_lokal[None], axis=0)[0]
+    # petakan indeks lokal -> indeks resmi di ISPU_PARAM
+    peta = np.array([ISPU_PARAM.index(p) for p in pakai])
+    return ispu, peta[kritis_lokal].astype("int16")
 
 
 def _load_wind(grib_path: Path) -> tuple[np.ndarray, np.ndarray, dict]:
@@ -240,11 +555,17 @@ def _speed_to_rgb(speed_knots: np.ndarray) -> np.ndarray:
     return out.round().astype("uint8")
 
 
-def _save_preview(img: Image.Image, dest: Path) -> None:
+def _save_preview(img: Image.Image, dest: Path, lossless: bool = False) -> None:
     """Simpan pratinjau (heatmap untuk mata): WebP q90 bila .webp (5-7x lebih kecil dari
-    PNG, visual sama). Data image (nilai angin di piksel) TETAP PNG lossless di tempat lain."""
+    PNG, visual sama). Data image (nilai angin di piksel) TETAP PNG lossless di tempat lain.
+
+    `lossless` untuk layer KATEGORI. Di layer menerus pergeseran warna 1-2 tingkat tak
+    terlihat, tapi di layer kategori warna ITU maknanya."""
     if str(dest).lower().endswith(".webp"):
-        img.save(dest, "WEBP", quality=90, method=4, alpha_quality=100)   # method 4: encode 2-3x lebih cepat, ukuran ~sama
+        if lossless:
+            img.save(dest, "WEBP", lossless=True, method=4)
+        else:
+            img.save(dest, "WEBP", quality=90, method=4, alpha_quality=100)   # method 4: encode 2-3x lebih cepat, ukuran ~sama
     else:
         img.save(dest)
 
@@ -297,13 +618,68 @@ def _scalar_to_rgba(values: np.ndarray, scale: list) -> np.ndarray:
     return out.round().astype("uint8")
 
 
-def _render_scalar_preview(values: np.ndarray, scale: list, dest: Path, scale_up: int = 4) -> None:
+# Layer yang nilainya KATEGORI, bukan besaran menerus. Dirender KOTAK-KOTAK:
+# diperbesar tanpa pembauran, ditambah garis kisi di tiap batas sel, lalu disimpan
+# lossless. Alasannya kategori ISPU itu diskret. Waktu sempat dihaluskan bilinear,
+# 28 persen piksel jatuh ke warna antara (mis. olive, campuran kuning Tidak Sehat
+# dan hitam Berbahaya) yang tak mewakili kategori mana pun.
+_LAYER_KATEGORI = {"ispu", *(f"dt_{p}" for p in DT_PARAM)}
+# Garis kisi menyesuaikan diri: sel terang digelapkan, sel gelap diterangkan. Kalau
+# dipatok satu warna, kisi di sel hitam (Berbahaya) akan lenyap.
+_KISI_CAMPUR = 0.34
+
+
+def _garis_kisi(a: np.ndarray, langkah: int, baris: np.ndarray) -> np.ndarray:
+    """Gambar garis kisi 1 piksel di tiap batas sel data.
+
+    Batas KOLOM tetap kelipatan `langkah` (bujur linear), tapi batas BARIS harus
+    diberikan, karena setelah proyeksi Mercator jaraknya tak lagi seragam."""
+    lum = a[..., :3].astype("f4") @ np.array([0.299, 0.587, 0.114], dtype="f4")
+    tuju = np.where(lum[..., None] > 128, 0.0, 255.0)         # terang -> hitam, gelap -> putih
+    campur = a[..., :3] * (1 - _KISI_CAMPUR) + tuju * _KISI_CAMPUR
+    campur = campur.round().astype("uint8")
+    a[baris, :, :3] = campur[baris, :, :]
+    a[:, ::langkah, :3] = campur[:, ::langkah, :]
+    return a
+
+
+# Layer yang hanya berlaku di DARATAN. Tampilannya dipotong mengikuti poligon
+# garis pantai, bukan mengikuti kotak grid, sesuai permintaan: sel pesisir boleh
+# terpotong melengkung. Volume udara di atas laut tak ada artinya untuk kuota emisi.
+_LAYER_DARAT = {f"dt_{p}" for p in DT_PARAM}
+
+
+# Pratinjau layer daya tampung diperbesar lebih tinggi dari layer lain. Kotak
+# datanya tetap 0,4 derajat, yang bertambah rapat cuma potongan pantainya:
+# 4x memberi tangga 0,1 derajat (~11 km), 8x jadi 0,05 derajat (~5,5 km).
+_LAYER_SKALA = {f"dt_{p}": 8 for p in DT_PARAM}
+
+
+def _render_scalar_preview(values: np.ndarray, scale: list, dest: Path, scale_up: int = 4,
+                           kategori: bool = False, grid: dict | None = None,
+                           potong_darat: bool = False) -> None:
     """PNG heatmap skalar berwarna (RGBA, transparan di area nilai ~0)."""
     rgba = _scalar_to_rgba(values, scale)
-    img = Image.fromarray(rgba, mode="RGBA")
-    if scale_up > 1:
-        img = img.resize((img.width * scale_up, img.height * scale_up), Image.BILINEAR)
-    _save_preview(img, dest)
+    # NaN berarti "tak terdefinisi di sini" (mis. sel tanpa daratan). Harus jadi
+    # bening, kalau tidak nan_to_num mengubahnya jadi 0 dan 0 itu warna kategori
+    # yang sah, jadi laut akan tampil seolah punya daya tampung.
+    kosong = ~np.isfinite(values)
+    if kosong.any():
+        rgba[..., 3] = np.where(kosong, 0, rgba[..., 3])
+    if scale_up > 1 and grid is not None:
+        a = _proyeksi_mercator(rgba, grid, scale_up, kategori)
+        if kategori:
+            a = _garis_kisi(a, scale_up, _batas_baris(grid, scale_up))
+        if potong_darat:
+            a = a.copy()
+            a[..., 3] = (a[..., 3] * topeng_darat(grid, scale_up)).round().astype("uint8")
+        img = Image.fromarray(a, mode="RGBA")
+    else:
+        img = Image.fromarray(rgba, mode="RGBA")
+        if scale_up > 1:
+            img = img.resize((img.width * scale_up, img.height * scale_up),
+                             Image.NEAREST if kategori else Image.BILINEAR)
+    _save_preview(img, dest, lossless=kategori)
 
 
 _SCALAR_SCALES = {
@@ -318,6 +694,7 @@ _SCALAR_SCALES = {
     "cin_surface": _CIN_SCALE,
     "pm25": _PM25_SCALE, "pm10": _PM10_SCALE, "co": _CO_SCALE,
     "no2": _NO2_SCALE, "so2": _SO2_SCALE, "o3": _O3_SCALE, "aod": _AOD_SCALE,
+    "ispu": _ISPU_SCALE, "pbl": _PBL_SCALE, **_DT_SCALES,
 }
 
 
@@ -404,7 +781,7 @@ def process_scalar(grib_path: Path, layer_key: str, run: dt.datetime, fstep: int
     meta_json = out_dir / f"{base}.json"
 
     scale = _SCALAR_SCALES.get(layer_key, _RAIN_SCALE)
-    _render_scalar_preview(values, scale, preview_png)
+    _render_scalar_preview(values, scale, preview_png, kategori=layer_key in _LAYER_KATEGORI)
 
     meta = {
         "layer": layer_key,
@@ -440,7 +817,9 @@ def write_scalar_frame(values: np.ndarray, grid: dict, layer_key: str, run: dt.d
     base = f"{layer_key}_{run:%Y%m%d_%H}_{base_suffix}"
     preview_png = out_dir / f"{base}_preview.webp"
     meta_json = out_dir / f"{base}.json"
-    _render_scalar_preview(values, scale, preview_png)
+    _render_scalar_preview(values, scale, preview_png, scale_up=_LAYER_SKALA.get(layer_key, 4),
+                           kategori=layer_key in _LAYER_KATEGORI,
+                           grid=grid, potong_darat=layer_key in _LAYER_DARAT)
     meta = {
         "layer": layer_key, "kind": "scalar", "model": "CAMS",
         "level": LAYERS[layer_key]["level_label"],
@@ -448,6 +827,10 @@ def write_scalar_frame(values: np.ndarray, grid: dict, layer_key: str, run: dt.d
         "valid_time": valid_dt.strftime("%Y-%m-%dT%H:00:00Z"),
         "forecast_step_hours": int((valid_dt - run).total_seconds() // 3600),
         "bounds": [grid["west"], grid["south"], grid["east"], grid["north"]],
+        # Kotak untuk MENEMPATKAN gambar: tepi sel, bukan pusat sel. Beda dengan
+        # `bounds` yang dipakai menyampel nilai per titik.
+        "image_bounds": [tepi_gambar(grid)[0], tepi_gambar(grid)[2],
+                         tepi_gambar(grid)[1], tepi_gambar(grid)[3]],
         "width": grid["width"], "height": grid["height"],
         "units": units, "preview_image": preview_png.name,
         "value_max": round(float(np.nanmax(values)), 2),
@@ -507,7 +890,18 @@ def write_point_data(series: dict, times: list, grid: dict, out_dir: Path = OUTP
 # bilinear di titik yang diklik lalu menggambar plot. Skalanya beda-beda karena
 # rentang parameternya jauh berbeda (CO bisa 100.000, AOD cuma 6).
 _PD_SCALE = {"pm25": 1.0, "pm10": 1.0, "co": 10.0, "no2": 0.1,
-             "so2": 0.1, "o3": 0.1, "aod": 0.001}
+             "so2": 0.1, "o3": 0.1, "aod": 0.001,
+             # ISPU dilaporkan sebagai bilangan bulat, jadi skala 1 sudah pas.
+             # Kode pencemar kritis itu indeks 0..5, bukan besaran.
+             "ispu": 1.0, "ispu_kritis": 1.0,
+             # PBL dalam meter, puncaknya ~3000. Muat di int16 tanpa diskalakan.
+             "pbl": 1.0,
+             # Daya tampung dalam ton/tahun, rentangnya lebar (ratusan ribu sampai
+             # jutaan negatif di sel karhutla). int16 dibagi 100 memberi jangkauan
+             # +-3,27 juta ton/tahun dengan resolusi 100 ton/tahun.
+             **{f"dt_{p}": 100.0 for p in DT_PARAM},
+             # Volume udara per sel dalam km3; puncaknya ~10.000, muat di int16.
+             "dt_vol": 1.0}
 
 
 def write_point_series(key: str, medan: list, waktu: list, grid: dict,

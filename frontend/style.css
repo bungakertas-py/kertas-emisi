@@ -46,6 +46,9 @@ html, body {
 /* ===================== MAP STAGE ===================== */
 #stage { position: fixed; inset: 0; }
 #map { position: absolute; inset: 0; background: #0a1018; }
+/* Layer ISPU memakai alas terang. Tanpa ini, sekejap sebelum tile termuat
+   yang terlihat latar gelap, dan peta seperti berkedip tiap ganti parameter. */
+#map.alas-terang { background: #e8e6e1; }
 .leaflet-container { background: #0a1018; font-family: var(--font-ui); }
 .velocity-overlay { pointer-events: none; }
 
@@ -86,9 +89,10 @@ html, body {
    Alasannya penting: transform TIDAK mengubah tata letak, jadi tinggi .layer-bar
    tetap dan tab di sebelahnya tak ikut bergeser sedikit pun. Kalau pakai
    display:none, kontainernya mengempis dan tombolnya melompat naik ke bawah brand. */
-.layers, .level-bar, .selects { transition: transform .28s ease; }
+.layers, .level-bar, .selects, .daya-dukung { transition: transform .28s ease; }
 .col.panels-hidden .layers,
 .col.panels-hidden .level-bar,
+.col.panels-hidden .daya-dukung,
 .col.panels-hidden .selects {
   transform: translateX(calc(-100% - 40px));   /* 40px = lewat padding #ui + ruang bayangan */
   pointer-events: none;
@@ -364,6 +368,11 @@ html, body {
 /* Legenda berlabel KATA (mis. Potensi Badai): sel melebar ikut isi, tak terpotong.
    Lebih spesifik dari override lebar-tetap di media query, jadi berlaku juga di HP. */
 .legend-words .legend-cell { width: auto; min-width: 44px; padding: 0 11px; white-space: nowrap; }
+/* Sel legenda DUA BARIS (ISPU): nama kategori di atas, rentang angka di bawah. */
+.legend-cell.dua-baris { flex-direction: column; justify-content: center; gap: 2px;
+  line-height: 1.1; padding: 5px 11px; }
+.legend-cell.dua-baris b { font-family: var(--font-display); font-size: 12px; font-weight: 700; }
+.legend-cell.dua-baris span { font-family: var(--font-mono); font-size: 9.5px; opacity: .78; }
 
 /* Loading */
 #loading {
@@ -726,7 +735,10 @@ html, body {
 .brand-info:hover .material-symbols-outlined { color: var(--on-lime); }
 
 /* ---- Pindah antar-app (Kertas Cuaca <-> Fenomena): panah di brand buka kontainer saudara ---- */
-.brand-row { display: flex; align-items: flex-start; gap: 10px; }
+/* position:relative jadi jangkar kartu saudara yang MENGAMBANG di sebelahnya.
+   Kartu itu TIDAK boleh ikut mengalir, kalau ikut, membukanya menambah tinggi
+   brand-row dan panel Parameter di bawahnya terdorong turun. */
+.brand-row { position: relative; display: flex; align-items: flex-start; gap: 10px; }
 .nav-arrow { flex: none; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
   background: var(--surface); border: 2px solid var(--ink); box-shadow: 2px 2px 0 0 var(--ink);
   cursor: pointer; pointer-events: auto; margin-left: 2px; }
@@ -735,12 +747,22 @@ html, body {
 .nav-arrow:hover .material-symbols-outlined { color: var(--on-lime); }
 .brand-row.nav-open .nav-arrow .material-symbols-outlined { transform: rotate(180deg); }
 /* Kartu app saudara: tersembunyi -> geser muncul ke KANAN saat panah ditekan.
-   Saat tutup border transparan & lebar 0 supaya tak ada sisa. */
+   Saat tutup border transparan & lebar 0 supaya tak ada sisa.
+   max-height WAJIB ikut 0. Tanpa itu kartu yang tertutup tetap memakan tinggi
+   (54px per kartu), brand-row jadi 108px bukan 62px, dan panel Parameter di
+   bawahnya ikut terdorong turun 46px. */
+/* Dua kartu saudara bertumpuk ke bawah, bukan berjajar, supaya tak
+   mendorong lebar brand-row di layar sempit. */
+/* Jarak antar kartu baru muncul saat panelnya terbuka. Kalau gap dipasang
+   permanen, dua kartu selebar 0 tetap menyisakan celah di brand-row. */
+.sibling-links { position: absolute; top: 0; left: 100%; margin-left: 10px;
+  display: flex; flex-direction: column; gap: 0; z-index: 700; }
+.brand-row.nav-open .sibling-links { gap: 8px; }
 .sibling-link { display: flex; align-items: center; gap: 11px; text-decoration: none; color: var(--ink);
   border: var(--bw) solid transparent; background: var(--surface); box-shadow: none;
-  max-width: 0; padding: 9px 0; opacity: 0; overflow: hidden; white-space: nowrap; pointer-events: none;
-  transition: max-width .3s ease, opacity .25s ease, padding .3s ease, border-color .2s ease, box-shadow .2s ease, transform .12s ease; }
-.brand-row.nav-open .sibling-link { max-width: 300px; opacity: 1; padding: 9px 13px; pointer-events: auto;
+  max-width: 0; max-height: 0; padding: 0; opacity: 0; overflow: hidden; white-space: nowrap; pointer-events: none;
+  transition: max-width .3s ease, max-height .3s ease, opacity .25s ease, padding .3s ease, border-color .2s ease, box-shadow .2s ease, transform .12s ease; }
+.brand-row.nav-open .sibling-link { max-width: 300px; max-height: 120px; opacity: 1; padding: 9px 13px; pointer-events: auto;
   border-color: var(--ink); box-shadow: var(--shadow); }
 .sibling-link:hover { background: var(--lime); transform: translate(2px, -2px); box-shadow: -6px 6px 0 0 var(--ink); }
 .sibling-link .pl-ico { flex: none; color: var(--primary); font-size: 26px; }
@@ -841,6 +863,9 @@ html, body {
 
 /* ---- SMARTPHONE (≤640px): layout vertikal ---- */
 @media (max-width: 640px) {
+  /* Di HP tak cukup ruang di kanan brand. Kartu saudara pindah ke BAWAH,
+     tetap mengambang jadi panel Parameter tak ikut terdorong. */
+  .sibling-links { left: 0; top: 100%; margin-left: 0; margin-top: 8px; }
   #ui { padding: 10px; }
   .ui-top { gap: 8px; align-items: flex-start; }
   /* kolom: anak-anaknya rapat ke kiri (jangan meregang mengikuti banner siklon) */
@@ -1004,9 +1029,51 @@ html, body {
 .pp-head { display: flex; align-items: baseline; gap: 5px; padding: 0 2px 4px; }
 .pp-head b { font-family: var(--font-display); font-size: 22px; line-height: 1; }
 .pp-head span { font-family: var(--font-mono); font-size: 10px; color: var(--variant); }
+/* Rumus kimia dengan angka turun. `line-height: 0` supaya <sub> tak menambah
+   tinggi baris dan tombol parameter tidak ikut melar. */
+sub { font-size: .72em; line-height: 0; vertical-align: baseline; position: relative; bottom: -.28em; }
+
+/* Kepala popup ISPU: angka besar + nama kategori, berlatar warna kategorinya.
+   Ini yang paling dulu dibaca orang, jadi ditaruh di atas plot. */
+.pp-ispu {
+  display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px;
+  padding: 7px 10px; border: var(--bw) solid var(--ink); color: var(--ink);
+}
+.pp-ispu.putih { color: var(--surface); }
+.pp-ispu b { font-family: var(--font-display); font-size: 24px; line-height: 1; }
+.pp-ispu span { font-family: var(--font-mono); font-size: 11px; letter-spacing: .03em; }
+.pp-kritis { font-family: var(--font-mono); font-size: 10px; color: var(--variant); margin: -4px 0 8px; }
+.pp-kritis b { color: var(--ink); }
+/* Rincian daya tampung: label kiri, angka kanan, satu baris per butir. */
+.pp-rinci { font-family: var(--font-mono); font-size: 10px; margin: 0 0 8px; }
+.pp-rinci div { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0;
+  border-bottom: 1px solid rgba(28,27,27,.1); }
+.pp-rinci div:last-child { border-bottom: none; }
+.pp-rinci span { color: var(--variant); }
+.pp-rinci b { color: var(--ink); font-weight: 700; }
+
+/* Kontainer Daya Dukung: pilihan parameter tersusun MENDATAR. */
+.daya-dukung { width: 224px; padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 7px; }
+.dd-row { display: flex; border: var(--bw) solid var(--ink); }
+.layer-btn.dd-btn { flex: 1 1 0; min-width: 0; justify-content: center; gap: 0;
+  padding: 7px 2px; font-size: 12.5px; border: none; border-right: 2px solid var(--ink); }
+.layer-btn.dd-btn:last-child { border-right: none; }
+
 .pp-svg { display: block; }
 .pp-grid { stroke: #d8dde3; stroke-width: 1; }
-.pp-ytick { font-family: var(--font-mono); font-size: 8.5px; fill: var(--variant); text-anchor: end; }
+.pp-ytick { font-family: var(--font-mono); font-size: 8px; fill: var(--variant); text-anchor: end; }
+/* Garis bantu setengah langkah, tanpa angka. Lebih pucat dari garis berlabel. */
+.pp-grid-halus { stroke: #e7ebef; stroke-width: 1; }
+/* Garis NOL di layer daya tampung: batas terlampaui atau belum. */
+.pp-nol { stroke: #1c1b1b; stroke-width: 1.4; opacity: .55; }
 .pp-xtick { font-family: var(--font-mono); font-size: 8.5px; fill: var(--variant); text-anchor: middle; }
-.pp-now { stroke: #e8590c; stroke-width: 1.2; stroke-dasharray: 3 3; }
+/* Satuan sumbu Y, diputar 90 derajat di tepi kiri plot. */
+.pp-yunit { font-family: var(--font-mono); font-size: 8.5px; fill: var(--variant); text-anchor: middle; }
+/* Garis baku mutu udara ambien (PP 22/2021), putus-putus netral gelap. */
+.pp-baku-garis { stroke: #1c1b1b; stroke-width: 1.3; stroke-dasharray: 6 4; opacity: .75; }
+/* Legenda garis itu: contoh garisnya sendiri + nilainya. Lebih cepat dibaca
+   daripada kalimat, dan langsung menghubungkan garis di plot dengan angkanya. */
+.pp-bmua { display: flex; align-items: center; gap: 6px; padding: 5px 2px 2px;
+  font-family: var(--font-mono); font-size: 9.5px; color: var(--variant); }
+.pp-bmua svg { flex: none; overflow: visible; }
 .pp-dot { fill: #e8590c; }

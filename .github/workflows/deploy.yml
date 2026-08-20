@@ -47,17 +47,19 @@ jobs:
           cp -r backend/data/output/. _site/backend/data/output/
           cat > _site/index.html <<'HTML'
           <!doctype html><meta charset="utf-8">
-          <title>Kertas Emisi — Peta kualitas udara interaktif Indonesia</title>
+          <title>Kertas Emisi, peta kualitas udara interaktif Indonesia</title>
+          <script>location.replace("./frontend/index.html")</script>
           <meta http-equiv="refresh" content="0; url=./frontend/index.html">
           <meta property="og:type" content="website">
           <meta property="og:site_name" content="Kertas Emisi">
-          <meta property="og:title" content="Kertas Emisi — Peta kualitas udara interaktif Indonesia">
-          <meta property="og:description" content="Angin, hujan, suhu, awan, dan tekanan untuk seluruh Indonesia. Klik lokasimu untuk prakiraan detail per jam.">
+          <meta property="og:title" content="Kertas Emisi, peta kualitas udara interaktif Indonesia">
+          <meta property="og:description" content="Sebaran PM2.5, PM10, CO, NO2, SO2, ozon, dan kabut asap untuk seluruh Indonesia. Klik lokasimu untuk grafik per jam.">
           <meta property="og:url" content="https://bungakertas-py.github.io/kertas-emisi/">
           <meta property="og:image" content="https://bungakertas-py.github.io/kertas-emisi/frontend/og-image.png">
           <meta name="twitter:card" content="summary_large_image">
           <meta name="twitter:image" content="https://bungakertas-py.github.io/kertas-emisi/frontend/og-image.png">
-          <a href="./frontend/index.html">Buka Kertas Cuaca</a>
+          <style>html,body{margin:0;height:100%;background:#0a1018}</style>
+          <a href="./frontend/index.html" style="position:absolute;left:-9999px">Buka Kertas Emisi</a>
           HTML
 
       - uses: actions/upload-pages-artifact@v3

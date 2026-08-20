@@ -8,6 +8,7 @@ kedua layanan sejak ECMWF menyatukan akunnya.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import io
 import os
 import time
@@ -93,7 +94,13 @@ def fetch(hari: dt.date, jam: str, variabel: list[str], dest: Path | None = None
           model_level: list[str] | None = None) -> Path:
     """Ambil satu berkas NetCDF berisi semua variabel & langkah yang diminta."""
     lead = lead or leadtimes()
+    # Sidik jari daftar variabel ikut masuk nama berkas. Tanpa ini, menambah satu
+    # variabel (mis. boundary_layer_height) akan DIAM-DIAM memakai unduhan lama yang
+    # belum memuatnya, dan gagalnya baru ketahuan jauh di hilir sebagai KeyError.
+    sidik = hashlib.sha1(",".join(sorted(variabel)).encode()).hexdigest()[:6]
     dest = dest or (RAW_DIR / f"cams_{hari:%Y%m%d}_{jam[:2]}.nc")
+    if dest.suffix == ".nc" and sidik not in dest.name:
+        dest = dest.with_name(f"{dest.stem}_{sidik}.nc")
     dest.parent.mkdir(parents=True, exist_ok=True)
     # Sudah pernah diunduh -> pakai lagi. Job ADS bisa antre menit-menitan, jadi
     # jangan diulang cuma karena mau ganti palet atau memperbaiki render.

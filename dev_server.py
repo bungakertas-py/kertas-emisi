@@ -45,7 +45,9 @@ class DevServer(socketserver.ThreadingTCPServer):
 
 
 if __name__ == "__main__":
-    with DevServer(("127.0.0.1", PORT), NoCacheHandler) as httpd:
+    # Bind 0.0.0.0, bukan 127.0.0.1: HP di Wi-Fi yang sama tak bisa menjangkau
+    # localhost komputer, jadi review di HP mustahil kalau hanya loopback.
+    with DevServer(("0.0.0.0", PORT), NoCacheHandler) as httpd:
         url = f"http://127.0.0.1:{PORT}/frontend/index.html"
         print("=" * 60)
         print(f"  Peta Cuaca — DEV SERVER (anti-cache)")

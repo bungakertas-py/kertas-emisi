@@ -9,26 +9,141 @@ const DATA_BASE = "../backend/data/output/";
 // menyala, jadi mengulangnya di legenda cuma memakan lebar.
 // Ambang & warnanya cermin _SCALAR_SCALES di process.py, jangan diubah sebelah pihak.
 const UG = "\u00b5g/m\u00b3";
-const _RAMP_HEX = ["#35c84a", "#ead821", "#f2701c", "#e42320", "#8a29c8"];
-const _leg = (head, ambang) => ({
-  head, cells: ambang.map((v, i) => [String(v), _RAMP_HEX[i], i >= 3 ? 1 : 0]),
+// Palet per parameter — cermin _PALET di process.py, JANGAN diubah sebelah pihak.
+// Tiap polutan punya keluarga warnanya sendiri supaya bisa dikenali tanpa membaca
+// label. `putih` menandai sel yang latarnya gelap, teksnya dibuat terang.
+const PALET = {
+  pm25: { warna: ["#fee187", "#feab49", "#fc5b2e", "#d41020", "#800026"], putih: [0, 0, 0, 1, 1] },   // YlOrRd
+  pm10: { warna: ["#feeba2", "#febb47", "#f07818", "#b84203", "#662506"], putih: [0, 0, 0, 1, 1] },   // YlOrBr, krem ke coklat tua
+  co:   { warna: ["#fcd0cc", "#f994b1", "#e23e99", "#99017b", "#49006a"], putih: [0, 0, 1, 1, 1] },   // RdPu
+  no2:  { warna: ["#e2e2ef", "#b6b6d8", "#8683bd", "#61409b", "#3f007d"], putih: [0, 0, 0, 1, 1] },   // Purples
+  so2:  { warna: ["#e5f5ac", "#a2d88a", "#4cb063", "#15793e", "#004529"], putih: [0, 0, 0, 1, 1] },   // YlGn
+  o3:   { warna: ["#ff9933", "#e53300", "#990000", "#4c0000", "#000000"], putih: [0, 1, 1, 1, 1] },   // gist_heat dibalik
+  aod:  { warna: ["#fc9f65", "#bd784c", "#7e5033", "#3f2819", "#000000"], putih: [0, 0, 1, 1, 1] },   // copper dibalik
+  // PBL dibaca TERBALIK: warna pekat ada di nilai RENDAH, karena lapisan aduk yang
+  // tipis mengurung emisi. Cermin _PBL_WARNA di process.py.
+  pbl:  { warna: ["#d7191c", "#f46d43", "#fdae61", "#fee08b", "#ffffbf"], putih: [1, 0, 0, 0, 0] },
+};
+
+// Kategori ISPU, Lampiran II Permen LHK 14/2020. [batas atas, nama, warna, teks putih]
+const ISPU_KAT = [
+  [50,  "Baik",               "#35c84a", 0],
+  [100, "Sedang",             "#2b83ba", 1],
+  [200, "Tidak Sehat",        "#ead821", 0],
+  [300, "Sangat Tidak Sehat", "#e42320", 1],
+  [Infinity, "Berbahaya",     "#0d0d0d", 1],
+];
+function ispuKategori(v) {
+  for (const k of ISPU_KAT) if (v <= k[0]) return k;
+  return ISPU_KAT[ISPU_KAT.length - 1];
+}
+
+const _leg = (key, head, ambang) => ({
+  head, cells: ambang.map((v, i) => [String(v), PALET[key].warna[i], PALET[key].putih[i]]),
 });
+// Rentang tiap kategori, ditulis apa adanya seperti Lampiran II.A.
+const ISPU_RENTANG = ["1-50", "51-100", "101-200", "201-300", "\u2265301"];
 const LEGENDS = {
-  pm25: _leg(UG, [15, 55, 150, 250, 400]),
-  pm10: _leg(UG, [50, 150, 350, 420, 600]),
-  co:   _leg(UG, [500, 1000, 2000, 4000, 8000]),
-  no2:  _leg(UG, [10, 25, 50, 100, 200]),
-  so2:  _leg(UG, [10, 40, 80, 200, 400]),
-  o3:   _leg(UG, [60, 100, 140, 180, 240]),
+  // Sel ISPU DUA BARIS: nama kategori di atas, rentang angkanya di bawah. Orang awam
+  // membaca kategorinya, orang yang terbiasa dengan ISPU mencari bilangannya.
+  ispu: { head: "ISPU", words: 1,
+          cells: ISPU_KAT.map(([, nama, warna, putih], i) => [nama, warna, putih, ISPU_RENTANG[i]]) },
+  pm25: _leg("pm25", UG, [15, 55, 150, 250, 400]),
+  pm10: _leg("pm10", UG, [50, 150, 350, 420, 600]),
+  co:   _leg("co", UG, [500, 1000, 2000, 4000, 8000]),
+  no2:  _leg("no2", UG, [10, 25, 50, 100, 200]),
+  so2:  _leg("so2", UG, [10, 40, 80, 200, 400]),
+  o3:   _leg("o3", UG, [60, 100, 140, 180, 240]),
   // AOD rasio pelemahan cahaya, memang tak bersatuan.
-  aod:  _leg("AOD 550 nm", [0.2, 0.5, 1, 2, 3]),
+  aod:  _leg("aod", "AOD 550 nm", [0.2, 0.5, 1, 2, 3]),
+  // PBL dalam meter, dibaca seperti legenda polutan. Bedanya arah: di sini yang
+  // pekat justru angka KECIL. Di atas 1500 m sengaja tak berwarna, artinya lega.
+  pbl:  _leg("pbl", "m", [200, 400, 700, 1000, 1500]),
+};
+
+// Baku Mutu Udara Ambien nasional, PP No. 22 Tahun 2021 Lampiran VII. Semua ug/m3.
+// Yang dipakai di plot mengikuti CADENCE layernya: layer harian (PM) memakai baku
+// mutu 24 jam, layer per-3-jam (gas) memakai baku mutu 1 jam, karena nilai kita
+// snapshot sesaat dan itu yang paling dekat. Nilai lain disimpan sebagai rujukan.
+const BAKU_MUTU = {
+  pm25: { "24 jam": 55,  "1 tahun": 15 },
+  pm10: { "24 jam": 75,  "1 tahun": 40 },
+  so2:  { "1 jam": 150,  "24 jam": 75, "1 tahun": 45 },
+  no2:  { "1 jam": 200,  "24 jam": 65, "1 tahun": 50 },
+  o3:   { "1 jam": 150,  "8 jam": 100, "1 tahun": 35 },
+  co:   { "1 jam": 10000, "8 jam": 4000 },
+  // Kabut Asap (AOD) dan ISPU sengaja tak punya: AOD bukan konsentrasi, ISPU indeks.
+};
+function bakuMutuLayer(key, harian) {
+  const b = BAKU_MUTU[key];
+  if (!b) return null;
+  const periode = harian ? "24 jam" : "1 jam";
+  return b[periode] != null ? { nilai: b[periode], periode } : null;
+}
+
+// ---- DAYA TAMPUNG UDARA (Permen LH No. 5) ----
+// Ambang kategori dihitung ulang di sini persis seperti di process.py, memakai
+// sel acuan 1.950 km2 dengan PBLH 700 m. R = beban emisi maksimum di sel acuan.
+// CATATAN: pembagian kategori ini TIDAK ada di peraturan. Yang bersandar aturan
+// cuma batas NOL, yaitu beban maksimum terlampaui atau belum.
+const DT_PARAM = ["pm25", "pm10", "so2", "no2"];
+const DT_LUAS_ACUAN = 1.95e9, DT_PBLH_ACUAN = 700, DT_HARI = 365;
+const DT_NAMA = ["Terlampaui berat", "Terlampaui", "Menipis", "Cukup", "Lega"];
+const DT_WARNA = ["#a50026", "#f46d43", "#fee08b", "#a6d96a", "#1a9850"];
+const DT_PUTIH = [1, 0, 0, 0, 1];
+function dtAmbang(par) {
+  const R = DT_LUAS_ACUAN * DT_PBLH_ACUAN * BAKU_MUTU[par]["24 jam"] / 1e12 * DT_HARI;
+  return [-1, 0, 0.25, 0.6].map((f) => Math.round((f * R) / 1000) * 1000);
+}
+// Kategori sebuah nilai daya tampung -> [nama, warna, teksPutih]
+function dtKategori(par, v) {
+  const a = dtAmbang(par);
+  for (let i = 0; i < a.length; i++) if (v < a[i]) return [DT_NAMA[i], DT_WARNA[i], DT_PUTIH[i]];
+  return [DT_NAMA[4], DT_WARNA[4], DT_PUTIH[4]];
+}
+const _rb = (v) => (v / 1000).toLocaleString("id-ID");
+function dtLegend(par) {
+  const a = dtAmbang(par);
+  const rentang = [`< ${_rb(a[0])}`, `${_rb(a[0])} - 0`, `0 - ${_rb(a[2])}`,
+                   `${_rb(a[2])} - ${_rb(a[3])}`, `> ${_rb(a[3])}`];
+  return { head: "ribu ton/tahun", words: 1,
+           cells: DT_NAMA.map((n, i) => [n, DT_WARNA[i], DT_PUTIH[i], rentang[i]]) };
+}
+
+// Legenda daya tampung ditambahkan DI SINI, bukan di dalam literal LEGENDS.
+// LEGENDS berdiri jauh di atas, sedangkan dtLegend butuh BAKU_MUTU; menaruhnya di
+// literal membuat const itu diakses sebelum terinisialisasi dan SELURUH app mati
+// sebelum sempat jalan. Warisan Kertas Cuaca pernah kena persis jebakan ini.
+for (const _p of DT_PARAM) LEGENDS[`dt_${_p}`] = dtLegend(_p);
+
+// Rumus kimia ditulis dengan angka turun. Dua bentuk: <sub> untuk tempat yang
+// menerima HTML, karakter Unicode untuk atribut & teks polos (tooltip, judul, share).
+const KIMIA_HTML = {
+  ispu: "ISPU", pm25: "PM<sub>2.5</sub>", pm10: "PM<sub>10</sub>", co: "CO",
+  no2: "NO<sub>2</sub>", so2: "SO<sub>2</sub>", o3: "O<sub>3</sub>", aod: "Kabut Asap",
+  pbl: "PBLH",
+  dt_pm25: "Daya Tampung PM<sub>2.5</sub>", dt_pm10: "Daya Tampung PM<sub>10</sub>",
+  dt_so2: "Daya Tampung SO<sub>2</sub>", dt_no2: "Daya Tampung NO<sub>2</sub>",
+};
+const KIMIA_TEKS = {
+  ispu: "ISPU", pm25: "PM\u2082.\u2085", pm10: "PM\u2081\u2080", co: "CO",
+  no2: "NO\u2082", so2: "SO\u2082", o3: "O\u2083", aod: "Kabut Asap",
+  pbl: "PBLH",
+  dt_pm25: "Daya Tampung PM\u2082.\u2085", dt_pm10: "Daya Tampung PM\u2081\u2080",
+  dt_so2: "Daya Tampung SO\u2082", dt_no2: "Daya Tampung NO\u2082",
 };
 
 // Tema per-layer: "dark" = latar peta gelap (overlay putih); "light" = latar
 // terang (overlay gelap). Menentukan label/batas/partikel.
 const LAYER_THEME = {
-  pm25: "dark", pm10: "dark", co: "dark", no2: "dark",
-  so2: "dark", o3: "dark", aod: "dark",
+  // Tiga layer pakai alas TERANG, alasannya sama: ujung palet mereka hitam atau
+  // nyaris hitam, dan hitam di atas alas gelap tak terbaca sebagai bahaya.
+  // ISPU dari warna resmi Lampiran II, O3 dari gist_heat dibalik, Kabut Asap dari
+  // copper dibalik. Empat layer sisanya ujungnya masih cukup terang, tetap gelap.
+  // Daya tampung ikut alas terang: kategori terburuknya merah tua #a50026.
+  ispu: "light", o3: "light", aod: "light",
+  dt_pm25: "light", dt_pm10: "light", dt_so2: "light", dt_no2: "light",
+  pm25: "dark", pm10: "dark", co: "dark", no2: "dark", so2: "dark", pbl: "dark",
   wind_surface: "dark", rain_surface: "dark", rain_accum_surface: "dark",
   temp_surface: "dark", humidity_surface: "dark", cloud_surface: "dark", pressure_surface: "dark",
   storm_potential: "dark", cin_surface: "dark", wind_strato: "dark", temp_strato: "dark",
@@ -153,13 +268,19 @@ const VIEW_CORE = L.latLngBounds([-28, 68], [28, 174]);
 // dark_NOLABELS, bukan dark_all. Alas sudah punya lapisan label sendiri di pane
 // "labels"; kalau alasnya juga membawa nama, namanya muncul dua kali di tempat yang
 // datanya transparan (mis. hujan saat kering).
-L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png", {
-  attribution: '&copy; OpenStreetMap &copy; CARTO | Data: NOAA GFS',
+const _alasOpts = {
+  // Sumber datanya CAMS, bukan GFS. Kertas Emisi mewarisi frontend Kertas Cuaca,
+  // dan atribusi ini ikut terbawa sebelum sempat dibetulkan.
+  attribution: '&copy; OpenStreetMap &copy; CARTO | Data: CAMS (Copernicus/ECMWF)',
   subdomains: "abcd",
   maxZoom: 12,
   updateWhenZooming: false, // tunda muat tile sampai zoom selesai → animasi mulus
   keepBuffer: 4,
-}).addTo(map);
+};
+// Dua alas. Gelap untuk enam layer polutan, terang khusus ISPU yang kategori
+// tertingginya berwarna hitam. Ditukar oleh applyTheme().
+const darkBase = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png", _alasOpts).addTo(map);
+const lightBase = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png", _alasOpts);
 
 // Pane heatmap kecepatan angin: di atas peta dasar (z200), di bawah partikel
 // (overlayPane z400) & label (z650). Ini "kontur warna" ala BMKG Signature.
@@ -205,10 +326,11 @@ let frames = [];
 let current = 0;
 let velocityLayer = null;
 let speedLayer = null;      // heatmap (imageOverlay preview PNG) — dipakai kedua layer
-let dataBounds = null;      // L.latLngBounds domain data penuh (untuk overlay)
+let dataBounds = null;      // L.latLngBounds domain data (pusat sel; utk klik & batas pan)
+let imageBounds = null;     // L.latLngBounds TEPI sel — hanya untuk menempatkan pratinjau
 let playing = false;
 let playTimer = null;
-let activeLayer = "pm25";
+let activeLayer = "ispu";
 let activeBase = "pm25";   // tombol layer aktif (kunci PERMUKAAN); di strato dipetakan ke varian _strato
 let mapLevel = "surface";          // "surface" | "strato" (70 hPa) — dari dropdown LEVEL
 let catalog = null;
@@ -320,6 +442,13 @@ function applyLabelTiles() {
 // Tema per-layer: angin = gelap (latar peta gelap), hujan = terang (latar putih).
 function applyTheme() {
   const light = LAYER_THEME[activeLayer] === "light";
+  // Tukar alas peta. Kelas di kontainer mengubah warna latar Leaflet juga, kalau
+  // tidak, saat tile belum termuat yang terlihat latar gelap sekejap.
+  const alasBaru = light ? lightBase : darkBase;
+  const alasLama = light ? darkBase : lightBase;
+  if (map.hasLayer(alasLama)) map.removeLayer(alasLama);
+  if (!map.hasLayer(alasBaru)) alasBaru.addTo(map);
+  map.getContainer().classList.toggle("alas-terang", light);
   applyLabelTiles();
   map.getPane("labels").classList.toggle("lbl-light", light);   // teks gelap di peta terang
   // Batas: override per-layer bila ada, jika tidak ikut tema (gelap/putih).
@@ -437,8 +566,9 @@ function renderLegend(layerKey) {
   if (!def || !head || !cells) return;
   head.textContent = def.head;
   cells.classList.toggle("legend-words", !!def.words);   // sel melebar utk label kata
-  cells.innerHTML = def.cells.map(([label, bg, dark]) =>
-    `<div class="legend-cell${dark ? " dark" : ""}" style="background:${bg}">${label}</div>`).join("");
+  cells.innerHTML = def.cells.map(([label, bg, dark, sub]) =>
+    `<div class="legend-cell${dark ? " dark" : ""}${sub ? " dua-baris" : ""}" style="background:${bg}">` +
+    (sub ? `<b>${label}</b><span>${sub}</span>` : label) + `</div>`).join("");
 }
 
 function setActiveLayer(layerKey) {
@@ -477,7 +607,7 @@ async function showFrame(i) {
   // Heatmap (kedua layer punya preview_image): angin = kecepatan, hujan = laju hujan.
   const url = DATA_BASE + frame.preview_image;
   if (!speedLayer) {
-    speedLayer = L.imageOverlay(url, dataBounds, { pane: "speed", opacity: 0.92, interactive: false });
+    speedLayer = L.imageOverlay(url, imageBounds || dataBounds, { pane: "speed", opacity: 0.92, interactive: false });
     speedLayer.addTo(map);
   } else {
     speedLayer.setUrl(url);
@@ -975,59 +1105,182 @@ function sampleSeries(pd, lat, lon) {
   return out;
 }
 
+// Sampel TETANGGA TERDEKAT. Dipakai untuk kode pencemar kritis, yang isinya nomor
+// kategori bukan besaran. Merata-ratakan kode 0 dan 4 menghasilkan 2, yaitu polutan
+// ketiga yang sama sekali tak terlibat. Jadi di sini tak boleh bilinear.
+function sampleSeriesNearest(pd, lat, lon) {
+  const { nx, ny, west, east, north, south, nt, scale } = pd.meta;
+  const dx = (east - west) / (nx - 1), dy = (north - south) / (ny - 1);
+  const x = Math.round(Math.max(0, Math.min(nx - 1, (lon - west) / dx)));
+  const y = Math.round(Math.max(0, Math.min(ny - 1, (north - lat) / dy)));
+  const out = [];
+  for (let t = 0; t < nt; t++) out.push(pd.arr[t * nx * ny + y * nx + x] * scale);
+  return out;
+}
+
 // Plot garis sederhana. Sengaja tanpa pustaka grafik: satu SVG, mudah dibaca,
 // dan tak menambah beban unduh.
-function seriesPlotSVG(vals, times, unit, daily, warna) {
+// Langkah sumbu Y. Dicari langkah BULAT TERKECIL yang masih muat dalam jatah
+// garis, bukan sekadar membagi rentang jadi empat. Bedanya terasa: membagi empat
+// memberi 0/50/100/150, cara ini memberi 0/20/40/.../160 di rentang yang sama.
+// Bentuk yang dianggap bulat: 1, 2, 2,5, 5 dikali pangkat sepuluh.
+const _MANTIS = [1, 2, 2.5, 5];
+function langkahSumbu(atas, maksTick) {
+  if (!(atas > 0)) return 1;
+  const e0 = Math.floor(Math.log10(atas)) - 3;
+  for (let e = e0; e <= e0 + 6; e++) {
+    for (const m of _MANTIS) {
+      const l = m * Math.pow(10, e);
+      if (l > 0 && Math.ceil(atas / l) + 1 <= maksTick) return l;
+    }
+  }
+  return atas / 4;
+}
+// Berapa desimal supaya langkahnya tercetak PERSIS. Langkah 0,25 butuh dua desimal;
+// membulatkannya ke satu desimal melahirkan deret 0,3 lalu 0,5 lalu 0,8 yang salah.
+function desimalLangkah(l) {
+  for (let d = 0; d <= 4; d++) {
+    const k = l * Math.pow(10, d);
+    if (Math.abs(k - Math.round(k)) < 1e-9) return d;
+  }
+  return 4;
+}
+
+function seriesPlotSVG(vals, times, unit, daily, warna, pita, baku) {
   const n = vals.length;
   if (!n) return "";
-  const W = 300, H = 150, padL = 42, padR = 8, padT = 10, padB = 24;
+  // padL sengaja ketat. Yang menentukan lebarnya cuma label terpanjang ("12.000")
+  // plus satu strip untuk satuan yang diputar; sisanya jadi ruang plot.
+  const W = 300, H = 200, padL = 46, padR = 10, padT = 10, padB = 26;
   const pw = W - padL - padR, ph = H - padT - padB, y0 = padT + ph;
   const vmax = Math.max(...vals), vmin = Math.min(...vals);
-  // Dasar sumbu selalu 0: konsentrasi itu besaran mutlak, memotong dasarnya
-  // membuat kenaikan kecil terlihat dramatis padahal tidak.
-  const hi = vmax <= 0 ? 1 : vmax * 1.15, lo = 0;
+  // Dasar sumbu NORMALNYA 0: konsentrasi itu besaran mutlak, memotong dasarnya
+  // membuat kenaikan kecil terlihat dramatis. Tapi daya tampung boleh MINUS, dan
+  // justru yang minus itu maknanya (beban maksimum sudah terlampaui), jadi sumbu
+  // ikut turun kalau deretnya memang menembus nol.
+  // Sumbu juga selalu memuat garis baku mutu walau konsentrasinya masih jauh di
+  // bawah, karena jarak ke ambang itu sendiri informasinya.
+  const atasKasar = Math.max(vmax * 1.08, baku ? baku.nilai * 1.05 : 0, 0);
+  const bawahKasar = Math.min(vmin * 1.08, 0);
+  const langkah = langkahSumbu(Math.max(atasKasar - bawahKasar, 1e-9), 13);
+  const hi = langkah * Math.ceil(atasKasar / langkah);
+  const lo = langkah * Math.floor(bawahKasar / langkah);
+  const desimal = desimalLangkah(langkah);
+  const angkaID = (v) => v.toLocaleString("id-ID", { minimumFractionDigits: desimal, maximumFractionDigits: desimal });
+
   const X = (i) => padL + (n === 1 ? pw / 2 : (i / (n - 1)) * pw);
   const Y = (v) => y0 - ((v - lo) / (hi - lo)) * ph;
   const garis = vals.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("");
-  const area = `M${X(0).toFixed(1)},${y0} ` +
+  // Zona di bawah garis diisi sampai NOL, bukan sampai dasar plot. Kalau diisi
+  // sampai dasar, deret daya tampung yang minus akan tampak seolah menumpuk
+  // "kelebihan", padahal justru sedang kekurangan.
+  const yNol = Math.min(y0, Math.max(padT, Y(0)));
+  const area = `M${X(0).toFixed(1)},${yNol.toFixed(1)} ` +
     vals.map((v, i) => `L${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("") +
-    ` L${X(n - 1).toFixed(1)},${y0} Z`;
+    ` L${X(n - 1).toFixed(1)},${yNol.toFixed(1)} Z`;
 
-  // Sumbu Y: tiga label saja biar tak sesak.
+  // Sumbu Y: mulai 0, naik dengan langkah bulat sampai batas atas. Di antara tiap
+  // dua label ada satu garis bantu tanpa angka, jadi mata bisa membaca setengah
+  // langkah (mis. tiap 5 saat labelnya tiap 10) tanpa angkanya berdesakan.
   let sy = "";
-  for (let k = 0; k <= 2; k++) {
-    const v = lo + (hi - lo) * (k / 2), y = Y(v);
-    const lab = v === 0 ? "0"
-      : v >= 100 ? Math.round(v) : v >= 10 ? v.toFixed(0) : v.toFixed(v >= 1 ? 1 : 2);
+  const nSetengah = Math.round((hi - lo) / (langkah / 2));
+  for (let k = 0; k <= nSetengah; k++) {
+    const v = lo + k * (langkah / 2);
+    const y = Y(v);
+    if (Math.abs(v) < langkah * 1e-6 && lo < 0) {
+      // Garis NOL dipertebal: di layer daya tampung, di situlah batas antara
+      // "masih ada ruang" dan "sudah terlampaui".
+      sy += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W - padR}" y2="${y.toFixed(1)}" class="pp-nol"/>` +
+            `<text x="${padL - 4}" y="${(y + 3).toFixed(1)}" class="pp-ytick">0</text>`;
+      continue;
+    }
+    if (k % 2) {
+      sy += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W - padR}" y2="${y.toFixed(1)}" class="pp-grid-halus"/>`;
+      continue;
+    }
     sy += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W - padR}" y2="${y.toFixed(1)}" class="pp-grid"/>` +
-          `<text x="${padL - 5}" y="${(y + 3.5).toFixed(1)}" class="pp-ytick">${lab}</text>`;
+          `<text x="${padL - 4}" y="${(y + 3).toFixed(1)}" class="pp-ytick">${angkaID(v)}</text>`;
   }
-  // Sumbu X: maksimum 4 label, format ikut cadence.
-  let sx = "";
-  const step = Math.max(1, Math.ceil(n / 4));
-  for (let i = 0; i < n; i += step) {
+  // Satuan sumbu Y, diputar 90 derajat di tepi kiri. ISPU tak bersatuan, jadi nama
+  // indeksnya sendiri yang dipakai supaya sumbunya tetap punya keterangan.
+  const satuanY = unit || (pita ? "ISPU" : "");
+  const cy = (padT + ph / 2).toFixed(1);
+  const yu = satuanY
+    ? `<text transform="rotate(-90 7 ${cy})" x="7" y="${cy}" class="pp-yunit">${satuanY}</text>` : "";
+
+  // Sumbu X mengikuti slider: label muncul di PERGANTIAN HARI, formatnya sama
+  // ("20 Agu"). Dulu layer per-jam cuma menampilkan jam, jadi deret 5 hari punya
+  // empat label "00:00" yang tak bisa dibedakan satu sama lain.
+  let ganti = [], hariSblm = null;
+  for (let i = 0; i < n; i++) {
+    const d = toWIB(times[i]).getUTCDate();
+    if (d !== hariSblm) { ganti.push(i); hariSblm = d; }
+  }
+  // Menjatah label BUKAN dengan melompati indeks, melainkan dengan menghitung
+  // tempat yang benar-benar dipakai tiap label. Cara lompat-indeks pernah membuat
+  // "20 Agu" dan "21 Agu" bertabrakan di layer per-3-jam: label pertama dipaku ke
+  // tepi kiri, sedangkan pergantian hari berikutnya jatuh cuma ~36 px dari situ,
+  // padahal satu label selebar ~32 px.
+  // Label dipusatkan di titiknya, KECUALI kalau begitu ujungnya keluar kanvas.
+  // Memaku label pertama ke tepi plot (cara lama) memajukannya ~15 px ke kiri,
+  // dan itu justru menyerempet label hari berikutnya sehingga ikut terbuang.
+  const LBL_W = 31, LBL_JEDA = 3;
+  let sx = "", kananTerpakai = -1e9;
+  for (const i of ganti) {
+    const x = X(i);
+    const anc = x - LBL_W / 2 < 2 ? "start" : (x + LBL_W / 2 > W - 2 ? "end" : "middle");
+    const gx = anc === "start" ? 2 : anc === "end" ? W - 2 : x;
+    const kiri = anc === "start" ? gx : anc === "end" ? gx - LBL_W : gx - LBL_W / 2;
+    if (kiri < kananTerpakai + LBL_JEDA) continue;      // tak muat, lewati
+    kananTerpakai = kiri + LBL_W;
     const w = toWIB(times[i]);
-    const lab = daily
-      ? `${w.getUTCDate()} ${MONTHS_ID[w.getUTCMonth()]}`
-      : `${String(w.getUTCHours()).padStart(2, "0")}:00`;
-    // Label pertama & terakhir dirapatkan ke tepi, kalau tetap di tengah ujungnya terpotong.
-    const anc = i === 0 ? "start" : (i + step >= n ? "end" : "middle");
-    const gx = i === 0 ? padL : (anc === "end" ? W - padR : X(i));
-    sx += `<text x="${gx.toFixed(1)}" y="${H - 7}" class="pp-xtick" style="text-anchor:${anc}">${lab}</text>`;
+    const lab = w.toLocaleDateString("id-ID", { day: "numeric", month: "short", timeZone: "UTC" });
+    sx += `<text x="${gx.toFixed(1)}" y="${H - 8}" class="pp-xtick" style="text-anchor:${anc}">${lab}</text>`;
   }
-  // Penanda waktu yang sedang tampil di peta.
-  let now = "";
+
+  // Penanda waktu yang sedang tampil di peta: DOT saja, tanpa garis tegak.
   const ci = nearestIndex(times, frames[current] && frames[current].valid_time);
-  if (ci >= 0) {
-    now = `<line x1="${X(ci).toFixed(1)}" y1="${padT}" x2="${X(ci).toFixed(1)}" y2="${y0}" class="pp-now"/>` +
-          `<circle cx="${X(ci).toFixed(1)}" cy="${Y(vals[ci]).toFixed(1)}" r="3.5" class="pp-dot"/>`;
-  }
+  const now = ci >= 0
+    ? `<circle cx="${X(ci).toFixed(1)}" cy="${Y(vals[ci]).toFixed(1)}" r="3.5" class="pp-dot"/>` : "";
   const kini = ci >= 0 ? vals[ci] : vals[0];
   const angka = kini >= 100 ? Math.round(kini) : kini >= 10 ? kini.toFixed(1) : kini.toFixed(2);
+
+  // Isi plot. Tanpa `pita` = satu warna rata seperti layer polutan. Dengan `pita`
+  // (dipakai ISPU) garis dan zonanya diwarnai MENURUT KATEGORI: tiap kategori
+  // dipotong jadi lapisan mendatar sesuai rentang nilainya, lalu jalur yang sama
+  // digambar ulang di tiap lapisan dengan warna kategori itu.
+  let defs = "", isi = "";
+  if (pita) {
+    pita.forEach(([batasAtas, col], i) => {
+      const bawahNilai = i === 0 ? lo : pita[i - 1][0];
+      if (bawahNilai >= hi) return;
+      const yAtas = Y(Math.min(batasAtas, hi));
+      const yBawah = Y(bawahNilai);
+      if (yBawah - yAtas <= 0.2) return;
+      defs += `<clipPath id="ppita${i}"><rect x="${padL}" y="${yAtas.toFixed(1)}" ` +
+              `width="${pw}" height="${(yBawah - yAtas).toFixed(1)}"/></clipPath>`;
+      isi += `<g clip-path="url(#ppita${i})">` +
+             `<path d="${area}" fill="${col}" opacity=".30"/>` +
+             `<path d="${garis}" fill="none" stroke="${col}" stroke-width="2"/></g>`;
+    });
+  } else {
+    isi = `<path d="${area}" fill="${warna}" opacity=".18"/>` +
+          `<path d="${garis}" fill="none" stroke="${warna}" stroke-width="2"/>`;
+  }
+
+  // Baku Mutu Udara Ambien (PP 22/2021). Garisnya SELALU ada, dan keterangannya
+  // berupa legenda contoh-garis, bukan kalimat.
+  let bm = "", ket = "";
+  if (baku) {
+    const yb = Y(baku.nilai);
+    bm = `<line x1="${padL}" y1="${yb.toFixed(1)}" x2="${W - padR}" y2="${yb.toFixed(1)}" class="pp-baku-garis"/>`;
+    ket = `<div class="pp-bmua"><svg width="30" height="9" aria-hidden="true">` +
+          `<line x1="0" y1="4.5" x2="30" y2="4.5" class="pp-baku-garis"/></svg>` +
+          `<span>BMUA (${baku.nilai.toLocaleString("id-ID")} ${unit || ""})</span></div>`;
+  }
   return `<div class="pp-head"><b>${angka}</b><span>${unit || ""}</span></div>` +
     `<svg class="pp-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">` +
-    `${sy}<path d="${area}" fill="${warna}" opacity=".18"/>` +
-    `<path d="${garis}" fill="none" stroke="${warna}" stroke-width="2"/>${now}${sx}</svg>`;
+    `<defs>${defs}</defs>${sy}${yu}${isi}${bm}${now}${sx}</svg>${ket}`;
 }
 
 function nearestIndex(times, vt) {
@@ -1040,9 +1293,6 @@ function nearestIndex(times, vt) {
   }
   return bi;
 }
-
-const PARAM_NAMA = { pm25: "PM2.5", pm10: "PM10", co: "CO", no2: "NO2",
-                     so2: "SO2", o3: "O3", aod: "Kabut Asap" };
 
 async function openPoint(lat, lon, label) {
   const key = activeLayer;
@@ -1059,9 +1309,65 @@ async function openPoint(lat, lon, label) {
   try {
     const pd = await loadSeries(key);
     const vals = sampleSeries(pd, lat, lon);
-    const warna = (LEGENDS[key]?.cells?.[1]?.[1]) || "#35c84a";
-    const isi = `<div class="pp-title">${judul}<span class="pp-par">${PARAM_NAMA[key] || key}</span></div>` +
-      `<div class="pp-body">${seriesPlotSVG(vals, pd.meta.times, pd.meta.units, pd.meta.daily, warna)}</div>`;
+    let warna = (LEGENDS[key]?.cells?.[1]?.[1]) || "#35c84a";
+    let kepala = "";
+    if (key === "ispu") {
+      // ISPU perlu dua hal lagi yang tak muat di plot: kategorinya, dan parameter
+      // mana yang bikin angkanya setinggi itu. Aturannya menyebut yang kedua
+      // "pencemar kritis", dan itu justru yang menentukan tindakan.
+      const i = Math.max(0, nearestIndex(pd.meta.times, frames[current] && frames[current].valid_time));
+      const nilai = Math.round(vals[i]);
+      const [, nama, bg, putih] = ispuKategori(nilai);
+      warna = bg;
+      let kritis = "";
+      try {
+        const pk = await loadSeries("ispu_kritis");
+        const kode = sampleSeriesNearest(pk, lat, lon);
+        const par = (pd.meta.kritis_param || [])[Math.round(kode[i])];
+        if (par) kritis = `<div class="pp-kritis">Pencemar kritis <b>${KIMIA_HTML[par] || par}</b></div>`;
+      } catch (e) { console.warn("pencemar kritis tak terbaca", e); }
+      kepala = `<div class="pp-ispu${putih ? " putih" : ""}" style="background:${bg}">` +
+               `<b>${nilai}</b><span>${nama}</span></div>${kritis}`;
+    }
+    const parDT = key.startsWith("dt_") ? key.slice(3) : null;
+    if (parDT) {
+      // Daya tampung: angka + kategori + pecahannya. BE max dan BE eks tak perlu
+      // disimpan sendiri, cukup volume udara per sel; BE max = V x BMUA, lalu
+      // BE eks = BE max - DT. Menghemat satu berkas deret per parameter.
+      const i = Math.max(0, nearestIndex(pd.meta.times, frames[current] && frames[current].valid_time));
+      const nilai = vals[i];
+      const [nama, bg, putih] = dtKategori(parDT, nilai);
+      warna = bg;
+      let rinci = "";
+      try {
+        const pv = await loadSeries("dt_vol");
+        const vol = sampleSeries(pv, lat, lon)[i];          // km3
+        if (isFinite(vol) && vol > 0) {
+          const bmua = BAKU_MUTU[parDT]["24 jam"];
+          const beMaxHari = (vol * 1e9) * bmua / 1e12;      // ton/hari
+          const beEksHari = beMaxHari - nilai / 365;
+          const r0 = (v) => Math.round(v).toLocaleString("id-ID");
+          rinci = `<div class="pp-rinci">` +
+            `<div><span>Volume udara</span><b>${r0(vol)} km³</b></div>` +
+            `<div><span>BE maksimum</span><b>${r0(beMaxHari * 365)} ton/th</b></div>` +
+            `<div><span>BE eksisting</span><b>${r0(beEksHari * 365)} ton/th</b></div>` +
+            `<div><span>BMUA 24 jam</span><b>${bmua} µg/m³</b></div></div>`;
+        }
+      } catch (e) { console.warn("volume udara tak terbaca", e); }
+      kepala = `<div class="pp-ispu${putih ? " putih" : ""}" style="background:${bg}">` +
+               `<b>${Math.round(nilai).toLocaleString("id-ID")}</b><span>${nama}</span></div>` +
+               `<div class="pp-kritis">ton/tahun, Permen LH No. 5</div>${rinci}`;
+    }
+    const pita = key === "ispu" ? ISPU_KAT.map(([batas, , col]) => [batas, col])
+      : parDT ? dtAmbang(parDT).map((b, k) => [b, DT_WARNA[k]]).concat([[Infinity, DT_WARNA[4]]])
+      : null;
+    const baku = bakuMutuLayer(key, !!pd.meta.daily);
+    // AOD memang tak bersatuan, tapi sumbu tanpa keterangan sama sekali bikin
+    // bingung. Nama besarannya sendiri yang dipakai.
+    const satuan = pd.meta.units || (key === "aod" ? "AOD" : "");
+    const isi = `<div class="pp-title">${judul}<span class="pp-par">${KIMIA_HTML[key] || key}</span></div>` +
+      `<div class="pp-body">${kepala}` +
+      `${seriesPlotSVG(vals, pd.meta.times, satuan, pd.meta.daily, warna, pita, baku)}</div>`;
     if (pointPopup) pointPopup.setContent(isi);
   } catch (e) {
     console.error(e);
@@ -1856,12 +2162,18 @@ async function init() {
     const avail = Object.keys((cat && cat.layers) || {});
     if (!avail.length) { cat = SHELL_CATALOG; dataMissing = true; }
     catalog = cat;
-    activeLayer = dataMissing ? null : (cat.layers["pm25"] ? "pm25" : avail[0]);
+    activeLayer = dataMissing ? null : (cat.layers["ispu"] ? "ispu" : (cat.layers["pm25"] ? "pm25" : avail[0]));
     frames = dataMissing ? [] : cat.layers[activeLayer].frames;
 
     // Domain data penuh (untuk imageOverlay heatmap).
     const [dw, ds, de, dn] = cat.region.bounds;
     dataBounds = L.latLngBounds([ds, dw], [dn, de]);
+    // Kotak untuk MENEMPATKAN gambar beda dengan kotak data. `bounds` itu
+    // pusat-ke-pusat sel, sedangkan pratinjau berisi blok-blok sel penuh, jadi
+    // penempatannya harus pakai TEPI sel. Backend lama tak mengirimnya, jadi
+    // mundur ke `bounds` supaya katalog lama tetap terbaca.
+    const ib = cat.region.image_bounds;
+    imageBounds = ib ? L.latLngBounds([ib[1], ib[0]], [ib[3], ib[2]]) : dataBounds;
 
     // Wire tombol layer: klik memilih varian sesuai LEVEL aktif (permukaan/strato).
     // Tombol tanpa data (atau diredupkan oleh level) diabaikan saat diklik.
