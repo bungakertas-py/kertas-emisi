@@ -269,6 +269,11 @@ html, body {
   text-shadow: 0 0 3px #000, 0 0 6px #000, 0 1px 2px #000;
 }
 .cc-cap + .cc-lbl { top: 37px; }   /* ibukota provinsi ikonnya lebih besar */
+/* Di layer beralas TERANG, label kota dibalik: tinta gelap berpendar putih. */
+.lbl-light .cc-lbl b, .lbl-light .cc-lbl i {
+  color: #14181f;
+  text-shadow: 0 0 3px #fff, 0 0 7px #fff, 0 1px 2px rgba(255, 255, 255, .95);
+}
 /* Nama negara & laut yang kita gambar sendiri (pengganti ubin label CARTO). */
 .geo-lbl { pointer-events: none; background: none; border: none; }
 .geo-lbl span { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); white-space: nowrap; }
@@ -368,6 +373,9 @@ html, body {
 /* Legenda berlabel KATA (mis. Potensi Badai): sel melebar ikut isi, tak terpotong.
    Lebih spesifik dari override lebar-tetap di media query, jadi berlaku juga di HP. */
 .legend-words .legend-cell { width: auto; min-width: 44px; padding: 0 11px; white-space: nowrap; }
+/* Sel angka bertanda dan bersufiks K (mis. -100K) butuh sedikit lebih lebar
+   daripada sel angka biasa, tapi tetap SERAGAM supaya terbaca sebagai ramp. */
+.legend-lebar .legend-cell { width: 50px; }
 /* Sel legenda DUA BARIS (ISPU): nama kategori di atas, rentang angka di bawah. */
 .legend-cell.dua-baris { flex-direction: column; justify-content: center; gap: 2px;
   line-height: 1.1; padding: 5px 11px; }
@@ -859,6 +867,7 @@ html, body {
   .legend-panel { min-width: 0; }
   .legend { overflow-x: auto; min-width: 0; }
   .legend-cell { width: 36px; }
+  .legend-lebar .legend-cell { width: 46px; }
 }
 
 /* ---- SMARTPHONE (≤640px): layout vertikal ---- */
@@ -968,6 +977,7 @@ html, body {
   .legend-panel { min-width: 0; align-self: flex-end; max-width: 100%; }
   .legend { overflow-x: auto; min-width: 0; }
   .legend-cell { width: 34px; min-height: 30px; font-size: 12px; }
+  .legend-lebar .legend-cell { width: 44px; }
 
   /* Tabel kondisi cuaca → 1 BARIS ringkas (ikon + label kecil), boleh scroll.
      In-flow di legend-col, jadi badge di atasnya otomatis ikut naik. */

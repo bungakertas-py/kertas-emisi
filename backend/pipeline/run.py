@@ -20,7 +20,8 @@ import config as C
 from config import KEEP_PAST_HOURS, LAYERS, OUTPUT_DIR
 import cams
 from process import (_export_velocity_json, hitung_daya_tampung, hitung_ispu,
-                     luas_sel, write_point_series, write_scalar_frame)
+                     luas_sel, write_city_data, write_point_series,
+                     write_scalar_frame)
 
 
 def _parse(ts: str) -> dt.datetime:
@@ -201,6 +202,7 @@ def main() -> None:
 
     point_meta = {}
     medan_semua = {}
+    kota_medan = {}      # semua parameter di SATU sumbu waktu, untuk label kota
     for key, lay in LAYERS.items():
         if lay["src"] == "turunan":
             continue                          # ISPU dihitung setelah semua parameter siap
@@ -218,10 +220,15 @@ def main() -> None:
 
         if lay["daily"]:
             n, seri, waktu = _tulis_harian(key, lay, medan, jam_lead, run, grid, vel_nama)
+            # Label kota memakai satu sumbu waktu untuk semua parameter. Rata-rata
+            # harian dikembalikan ke tiap langkah di hari yang sama, jadi label PM
+            # menampilkan rata 24 jam hari itu, bukan angka sesaat.
+            kota_medan[key] = _sebar_harian(seri, waktu, jam_lead, run)
         else:
             n = _tulis_per_langkah(key, lay, medan, jam_lead, run, grid, vel_nama)
             seri, waktu = medan, [(run + dt.timedelta(hours=h)).strftime("%Y-%m-%dT%H:00:00Z")
                                   for h in jam_lead]
+            kota_medan[key] = medan
         pm = write_point_series(key, seri, waktu, grid)
         pm["units"] = lay["units"]
         pm["daily"] = bool(lay["daily"])
@@ -249,6 +256,7 @@ def main() -> None:
     pm["kritis_param"] = C.ISPU_PARAM
     point_meta["ispu"] = pm
     point_meta["ispu_kritis"] = pmk
+    kota_medan["ispu"] = seri_i
     rata_i = np.nanmean([m.mean() for m in seri_i])
     maks_i = np.nanmax([np.nanmax(m) for m in seri_i])
     print(f"  {'ispu':5} {len(seri_i):>3} frame  rata {rata_i:9.3f}  maks {maks_i:10.2f}  "
@@ -267,6 +275,7 @@ def main() -> None:
         pm.update({"units": "ton/tahun", "daily": False, "parameter": par,
                    "bmua": C.BMUA_24JAM[par], "window_hours": C.ISPU_WINDOW_HOURS})
         point_meta[f"dt_{par}"] = pm
+        kota_medan[f"dt_{par}"] = seri_dt[par]
         nilai = np.stack(seri_dt[par])[:, darat]
         n = nilai.size
         print(f"  dt_{par:5} {len(seri_dt[par]):>3} frame  "
@@ -280,6 +289,10 @@ def main() -> None:
     pv = write_point_series("dt_vol", vol_dt, waktu_dt, grid)
     pv.update({"units": "km3", "daily": False})
     point_meta["dt_vol"] = pv
+
+    waktu_penuh = [(run + dt.timedelta(hours=h)).strftime("%Y-%m-%dT%H:00:00Z") for h in jam_lead]
+    ukuran = write_city_data(kota_medan, waktu_penuh, grid)
+    print(f"  nilai per kota: {len(kota_medan)} parameter, {ukuran/1e6:.2f} MB")
 
     ds_s.close(); ds_m.close()
     (OUTPUT_DIR / "point_meta.json").write_text(json.dumps(point_meta, indent=2))
@@ -426,6 +439,23 @@ def _ringkas_kritis(seri_i, seri_k) -> None:
     bagian.sort(key=lambda x: -x[1])
     txt = ", ".join(f"{nama} {100 * c / n:.1f}%" for nama, c in bagian)
     print(f"  pencemar kritis: {txt}")
+
+
+def _sebar_harian(seri, waktu, jam_lead, run):
+    """Kembalikan rata-rata harian ke sumbu langkah penuh: tiap langkah memakai
+    rata-rata hari WIB tempat langkah itu jatuh."""
+    per_tgl = {w[:10]: a for w, a in zip(waktu, seri)}
+    keluar = []
+    for h in jam_lead:
+        vt = run + dt.timedelta(hours=h)
+        tgl = dt.datetime.combine((vt + dt.timedelta(hours=C.WIB)).date(), dt.time(12),
+                                  tzinfo=dt.timezone.utc) - dt.timedelta(hours=C.WIB)
+        keluar.append(per_tgl.get(tgl.strftime("%Y-%m-%d"), None))
+    # hari yang tak punya rata-rata (kepotong di ujung) diisi NaN, bukan diulang
+    contoh = next(a for a in keluar if a is not None) if any(a is not None for a in keluar) else None
+    if contoh is None:
+        return []
+    return [a if a is not None else np.full_like(contoh, np.nan) for a in keluar]
 
 
 def _tulis_per_langkah(key, lay, medan, jam_lead, run, grid, vel_nama) -> int:

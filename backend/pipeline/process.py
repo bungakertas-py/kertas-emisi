@@ -308,44 +308,33 @@ def _skala_tangga(batas, warna):
 
 
 # ============ DAYA TAMPUNG UDARA (Permen LH No. 5) ============
-# Volume udara acuan untuk menetapkan AMBANG kategori: satu sel grid di lintang
-# rendah (~1.950 km2) dengan PBLH 700 m. Dari situ lahir R = beban emisi maksimum
-# di sel acuan, dan ambang kategorinya dinyatakan sebagai kelipatan R. Cara ini
-# dipakai supaya ambangnya ikut menyesuaikan BMUA tiap parameter, bukan angka
-# yang dikarang satu-satu.
+# Skala warna daya tampung. Peraturan cuma memberi rumus dan satu batas yang
+# berarti, yaitu NOL (beban maksimum terlampaui atau belum), jadi tak ada
+# penggolongan buatan; yang ada cuma angka ton/tahun.
 #
-# PENTING, ambang kategori ini TIDAK ADA di peraturan. Permen LH 5 hanya memberi
-# rumusnya, tak menggolongkan hasilnya. Yang bersandar pada aturan cuma batas
-# NOL (beban maksimum terlampaui atau belum); sisanya pembagian buatan sendiri
-# untuk keperluan peta, dan itu ditulis terbuka di UI.
-_DT_LUAS_ACUAN = 1.95e9      # m2
-_DT_PBLH_ACUAN = 700.0       # m
-_DT_WARNA = [
-    (0xa5, 0x00, 0x26, 235),   # terlampaui berat  (DT < -R)
-    (0xf4, 0x6d, 0x43, 225),   # terlampaui        (-R .. 0)
-    (0xfe, 0xe0, 0x8b, 215),   # menipis           (0 .. 0,25R)
-    (0xa6, 0xd9, 0x6a, 205),   # cukup             (0,25R .. 0,6R)
-    (0x1a, 0x98, 0x50, 200),   # lega              (> 0,6R)
+# Palet bwr matplotlib DIBALIK dan sisi birunya diganti hijau, jadi merah-putih-hijau.
+# Arahnya sengaja begitu: MERAH berarti beban maksimum terlampaui, HIJAU berarti
+# masih ada daya tampung. Dipotong jadi PITA 20.000 ton/tahun dari -100K sampai
+# +100K, bertingkat bukan gradasi mulus supaya beda antar sel terbaca. Di luar
+# rentang itu warnanya jenuh, dan itu disengaja: sel karhutla bisa mencapai
+# -6,8 juta, kalau sumbunya dipaksa memuat itu seluruh peta lain jadi putih.
+_DT_RENTANG = 100_000.0
+_DT_LANGKAH = 20_000.0
+_DT_ALPHA = 225
+# Warna diambil di TENGAH tiap pita pada palet bwr.
+_DT_PITA = [
+    (0xff, 0x18, 0x18), (0xff, 0x4c, 0x4c), (0xff, 0x7e, 0x7e), (0xff, 0xb2, 0xb2),
+    (0xff, 0xe6, 0xe6),
+    (0xe6, 0xff, 0xe6), (0xb2, 0xff, 0xb2), (0x80, 0xff, 0x80), (0x4c, 0xff, 0x4c),
+    (0x18, 0xff, 0x18),
 ]
 
-
-def dt_acuan(par: str) -> float:
-    """R, beban emisi maksimum di sel acuan, ton/tahun."""
-    return (_DT_LUAS_ACUAN * _DT_PBLH_ACUAN * BMUA_24JAM[par]
-            / UG_PER_TON * HARI_PER_TAHUN)
-
-
-def dt_ambang(par: str) -> list[float]:
-    """Empat batas kategori daya tampung (ton/tahun), dibulatkan ke ribuan."""
-    R = dt_acuan(par)
-    return [round(f * R / 1000) * 1000 for f in (-1.0, 0.0, 0.25, 0.6)]
-
-
-_DT_SCALES = {}
-for _par in DT_PARAM:
-    _b = dt_ambang(_par)
-    _R = dt_acuan(_par)
-    _DT_SCALES[f"dt_{_par}"] = _skala_tangga([-20 * _R] + _b + [20 * _R], _DT_WARNA)
+_DT_TEPI = [-_DT_RENTANG + _DT_LANGKAH * k for k in range(len(_DT_PITA) + 1)]
+_DT_SCALE = _skala_tangga(
+    [-1e12] + _DT_TEPI[1:-1] + [1e12],
+    [(*c, _DT_ALPHA) for c in _DT_PITA],
+)
+_DT_SCALES = {f"dt_{p}": _DT_SCALE for p in DT_PARAM}
 
 
 def luas_sel(grid: dict) -> np.ndarray:
@@ -929,20 +918,24 @@ CITY_PLACES = BACKEND_DIR.parent / "frontend" / "data" / "id_places.json"
 # Skala penyimpanan: nilai dibagi angka ini lalu dibulatkan jadi bilangan bulat,
 # supaya JSON-nya pendek. Frontend mengalikannya kembali.
 _CITY_ENC = {
-    "wind": 0.1,       # knot
-    "rain": 0.1,       # mm/jam
-    "temp": 0.1,       # derajat C
-    "humidity": 1,     # persen
-    "cloud": 1,        # persen
-    "pressure": 0.1,   # hPa
-    "cape": 1,         # J/kg
-    "cin": 1,          # J/kg, negatif
+    "ispu": 0.1, "pm25": 0.1, "pm10": 0.1, "co": 1.0, "no2": 0.01,
+    "so2": 0.01, "o3": 0.1, "aod": 0.001, "pbl": 1.0,
+    # Daya tampung ton/tahun, rentangnya jutaan. Skala 100 memendekkan JSON tanpa
+    # kehilangan arti, toh label kota membulatkannya ke ribuan ton.
+    **{f"dt_{p}": 100.0 for p in DT_PARAM},
 }
 
 
-def write_city_data(series: dict, times: list, grid: dict, out_dir: Path = OUTPUT_DIR) -> int:
-    """Sampel bilinear tiap variabel di titik kota/kabupaten -> city_data.json.
-    Rumus sampelnya sengaja sama dengan sampleVarAt() di frontend."""
+def write_city_data(medan: dict, times: list, grid: dict, out_dir: Path = OUTPUT_DIR) -> int:
+    """Sampel bilinear tiap parameter di titik kota/kabupaten -> city_data.json.
+
+    Label kota cuma butuh nilai di 514 titik, bukan seluruh grid 296x165. Kalau
+    frontend memakai pd_*.bin.gz (belasan MB) demi angka segitu, hampir seluruh
+    isinya terbuang. Jadi disampel di sini, sekali saat pipeline jalan.
+
+    `medan` = {kunci_layer: daftar array}. Daftar yang lebih PENDEK dari `times`
+    dianggap mulai belakangan (mis. ISPU saat pemanasan gagal) dan bagian depannya
+    diisi null, bukan diulang, supaya frontend tak menampilkan angka karangan."""
     if not CITY_PLACES.exists():
         print(f"  city_data dilewati: {CITY_PLACES.name} tak ada")
         return 0
@@ -958,31 +951,33 @@ def write_city_data(series: dict, times: list, grid: dict, out_dir: Path = OUTPU
     y0 = np.floor(fy).astype(int); y1 = np.minimum(y0 + 1, ny - 1); ty = fy - y0
 
     def samp(a):
-        a = np.nan_to_num(np.asarray(a, dtype="float64"))
-        top = a[y0, x0] * (1 - tx) + a[y0, x1] * tx
-        bot = a[y1, x0] * (1 - tx) + a[y1, x1] * tx
-        return top * (1 - ty) + bot * ty
+        a = np.asarray(a, dtype="float64")
+        atas = a[y0, x0] * (1 - tx) + a[y0, x1] * tx
+        bawah = a[y1, x0] * (1 - tx) + a[y1, x1] * tx
+        return atas * (1 - ty) + bawah * ty
 
-    data = {}
-    for var, scale in _CITY_ENC.items():
-        if var == "wind":
-            us, vs = series.get("u"), series.get("v")
-            if not us or not vs:
-                continue
-            per_t = [np.sqrt(samp(u) ** 2 + samp(v) ** 2) * MS_TO_KNOTS for u, v in zip(us, vs)]
-        else:
-            arrs = series.get(var)
-            if not arrs or len(arrs) != len(times):
-                continue
-            per_t = [samp(a) for a in arrs]
-        # (nwaktu, nkota) -> (nkota, nwaktu), satu deret per kota
-        stack = np.round(np.stack(per_t) / scale).astype("int32").T
-        data[var] = stack.tolist()
+    nt = len(times)
+    data, skala = {}, {}
+    for kunci, arr in medan.items():
+        if kunci not in _CITY_ENC or not arr:
+            continue
+        s = _CITY_ENC[kunci]
+        per_t = [samp(a) for a in arr]
+        blok = np.stack(per_t) / s                       # (nwaktu, nkota)
+        kosong = ~np.isfinite(blok)
+        bulat = np.where(kosong, 0, np.round(blok)).astype("int64").T   # (nkota, nwaktu)
+        kosong = kosong.T
+        depan = nt - bulat.shape[1]                      # deret yang mulai belakangan
+        baris = []
+        for i in range(bulat.shape[0]):
+            v = [None] * depan + [None if kosong[i, k] else int(bulat[i, k])
+                                  for k in range(bulat.shape[1])]
+            baris.append(v)
+        data[kunci] = baris
+        skala[kunci] = s
 
-    doc = {"times": times,
-           "scales": {v: _CITY_ENC[v] for v in data},
-           "places": [p["n"] for p in places],
-           "data": data}
+    doc = {"times": times, "scales": skala,
+           "places": [p["n"] for p in places], "data": data}
     path = out_dir / "city_data.json"
     path.write_text(json.dumps(doc, separators=(",", ":")), encoding="utf-8")
     return path.stat().st_size

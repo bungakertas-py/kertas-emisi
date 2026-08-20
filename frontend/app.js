@@ -82,39 +82,33 @@ function bakuMutuLayer(key, harian) {
 }
 
 // ---- DAYA TAMPUNG UDARA (Permen LH No. 5) ----
-// Ambang kategori dihitung ulang di sini persis seperti di process.py, memakai
-// sel acuan 1.950 km2 dengan PBLH 700 m. R = beban emisi maksimum di sel acuan.
-// CATATAN: pembagian kategori ini TIDAK ada di peraturan. Yang bersandar aturan
-// cuma batas NOL, yaitu beban maksimum terlampaui atau belum.
+// Skalanya MENERUS, cermin _DT_SCALE di process.py. Peraturan cuma memberi rumus
+// dan satu batas yang berarti: NOL. Positif berarti beban maksimum belum
+// terlampaui, negatif berarti sudah. Penggolongan di luar itu tak ada dasarnya,
+// jadi tak ada lagi kategori buatan di legenda.
 const DT_PARAM = ["pm25", "pm10", "so2", "no2"];
-const DT_LUAS_ACUAN = 1.95e9, DT_PBLH_ACUAN = 700, DT_HARI = 365;
-const DT_NAMA = ["Terlampaui berat", "Terlampaui", "Menipis", "Cukup", "Lega"];
-const DT_WARNA = ["#a50026", "#f46d43", "#fee08b", "#a6d96a", "#1a9850"];
-const DT_PUTIH = [1, 0, 0, 0, 1];
-function dtAmbang(par) {
-  const R = DT_LUAS_ACUAN * DT_PBLH_ACUAN * BAKU_MUTU[par]["24 jam"] / 1e12 * DT_HARI;
-  return [-1, 0, 0.25, 0.6].map((f) => Math.round((f * R) / 1000) * 1000);
+const DT_RENTANG = 100000, DT_LANGKAH = 20000;
+// Warna tiap PITA 20K. Cermin _DT_PITA di process.py: palet bwr dibalik dan sisi
+// birunya diganti hijau. MERAH berarti terlampaui, HIJAU berarti masih ada ruang.
+const DT_PITA = ["#ff1818", "#ff4c4c", "#ff7e7e", "#ffb2b2", "#ffe6e6",
+                 "#e6ffe6", "#b2ffb2", "#80ff80", "#4cff4c", "#18ff18"];
+const DT_PUTIH = [1, 1, 0, 0, 0, 0, 0, 0, 0, 0];   // sel gelap -> teksnya diterangkan
+// Tepi BAWAH tiap pita; itu yang jadi label, jadi legenda terbaca "mulai dari".
+const DT_TEPI = DT_PITA.map((_, k) => -DT_RENTANG + DT_LANGKAH * k);
+function dtIndeks(v) {
+  const k = Math.floor((v + DT_RENTANG) / DT_LANGKAH);
+  return Math.min(DT_PITA.length - 1, Math.max(0, k));
 }
-// Kategori sebuah nilai daya tampung -> [nama, warna, teksPutih]
-function dtKategori(par, v) {
-  const a = dtAmbang(par);
-  for (let i = 0; i < a.length; i++) if (v < a[i]) return [DT_NAMA[i], DT_WARNA[i], DT_PUTIH[i]];
-  return [DT_NAMA[4], DT_WARNA[4], DT_PUTIH[4]];
-}
-const _rb = (v) => (v / 1000).toLocaleString("id-ID");
-function dtLegend(par) {
-  const a = dtAmbang(par);
-  const rentang = [`< ${_rb(a[0])}`, `${_rb(a[0])} - 0`, `0 - ${_rb(a[2])}`,
-                   `${_rb(a[2])} - ${_rb(a[3])}`, `> ${_rb(a[3])}`];
-  return { head: "ribu ton/tahun", words: 1,
-           cells: DT_NAMA.map((n, i) => [n, DT_WARNA[i], DT_PUTIH[i], rentang[i]]) };
-}
-
-// Legenda daya tampung ditambahkan DI SINI, bukan di dalam literal LEGENDS.
-// LEGENDS berdiri jauh di atas, sedangkan dtLegend butuh BAKU_MUTU; menaruhnya di
-// literal membuat const itu diakses sebelum terinisialisasi dan SELURUH app mati
-// sebelum sempat jalan. Warisan Kertas Cuaca pernah kena persis jebakan ini.
-for (const _p of DT_PARAM) LEGENDS[`dt_${_p}`] = dtLegend(_p);
+const dtWarna = (v) => DT_PITA[dtIndeks(v)];
+// Ribuan disingkat K supaya "-100.000" tak memakan lebar sel. Nol tetap "0".
+const _K = (v) => (v === 0 ? "0" : (v / 1000).toLocaleString("id-ID") + "K");
+const DT_LEGEND = {
+  head: "ton/tahun", lebar: 1,
+  cells: DT_TEPI.map((v, k) => [_K(v), DT_PITA[k], DT_PUTIH[k]]),
+};
+// Dipasang DI SINI, bukan di dalam literal LEGENDS: LEGENDS berdiri jauh di atas,
+// dan menaruh rujukan ke const yang belum terinisialisasi mematikan seluruh app.
+for (const _p of DT_PARAM) LEGENDS[`dt_${_p}`] = DT_LEGEND;
 
 // Rumus kimia ditulis dengan angka turun. Dua bentuk: <sub> untuk tempat yang
 // menerima HTML, karakter Unicode untuk atribut & teks polos (tooltip, judul, share).
@@ -140,9 +134,11 @@ const LAYER_THEME = {
   // nyaris hitam, dan hitam di atas alas gelap tak terbaca sebagai bahaya.
   // ISPU dari warna resmi Lampiran II, O3 dari gist_heat dibalik, Kabut Asap dari
   // copper dibalik. Empat layer sisanya ujungnya masih cukup terang, tetap gelap.
-  // Daya tampung ikut alas terang: kategori terburuknya merah tua #a50026.
+  // Daya tampung memakai alas GELAP, bukan terang seperti tiga layer di atas.
+  // Titik tengah palet bwr itu PUTIH, dan putih di atas alas terang lenyap sama
+  // sekali; sel yang nyaris pas di ambang justru akan tampak seperti lubang.
   ispu: "light", o3: "light", aod: "light",
-  dt_pm25: "light", dt_pm10: "light", dt_so2: "light", dt_no2: "light",
+  dt_pm25: "dark", dt_pm10: "dark", dt_so2: "dark", dt_no2: "dark",
   pm25: "dark", pm10: "dark", co: "dark", no2: "dark", so2: "dark", pbl: "dark",
   wind_surface: "dark", rain_surface: "dark", rain_accum_surface: "dark",
   temp_surface: "dark", humidity_surface: "dark", cloud_surface: "dark", pressure_surface: "dark",
@@ -451,6 +447,9 @@ function applyTheme() {
   map.getContainer().classList.toggle("alas-terang", light);
   applyLabelTiles();
   map.getPane("labels").classList.toggle("lbl-light", light);   // teks gelap di peta terang
+  // Label kota ikut membalik. Putih-berpendar-hitam di atas alas terang (ISPU,
+  // O3, Kabut Asap, daya tampung) terbaca berat dan kotor.
+  map.getPane("cityicons").classList.toggle("lbl-light", light);
   // Batas: override per-layer bila ada, jika tidak ikut tema (gelap/putih).
   const color = BORDER_COLOR[activeLayer] || (light ? "#1c1b1b" : "#ffffff");
   const opacity = light ? 0.7 : 0.85;
@@ -566,6 +565,7 @@ function renderLegend(layerKey) {
   if (!def || !head || !cells) return;
   head.textContent = def.head;
   cells.classList.toggle("legend-words", !!def.words);   // sel melebar utk label kata
+  cells.classList.toggle("legend-lebar", !!def.lebar);   // sel sedikit lebih lebar utk angka spt -100K
   cells.innerHTML = def.cells.map(([label, bg, dark, sub]) =>
     `<div class="legend-cell${dark ? " dark" : ""}${sub ? " dua-baris" : ""}" style="background:${bg}">` +
     (sub ? `<b>${label}</b><span>${sub}</span>` : label) + `</div>`).join("");
@@ -1297,11 +1297,13 @@ function nearestIndex(times, vt) {
 async function openPoint(lat, lon, label) {
   const key = activeLayer;
   if (!key) return;
+  // Tutup popup lama LEBIH DULU. Penutupan memicu penangan popupclose yang
+  // membersihkan state, jadi kalau state diisi duluan justru ikut terhapus.
+  if (pointPopup) map.closePopup(pointPopup);
   popupLabel = label || null;
   sharedPoint = { lat, lon, name: label || null };
   updateHash();
   const judul = label || fmtCoord(lat, lon);
-  if (pointPopup) map.closePopup(pointPopup);
   pointPopup = L.popup({ className: "pt-pop", maxWidth: 330, autoPan: true, closeOnClick: false })
     .setLatLng([lat, lon])
     .setContent(`<div class="pp-title">${judul}</div><div class="pp-body">Memuat…</div>`)
@@ -1336,7 +1338,11 @@ async function openPoint(lat, lon, label) {
       // BE eks = BE max - DT. Menghemat satu berkas deret per parameter.
       const i = Math.max(0, nearestIndex(pd.meta.times, frames[current] && frames[current].valid_time));
       const nilai = vals[i];
-      const [nama, bg, putih] = dtKategori(parDT, nilai);
+      const bg = dtWarna(nilai);
+      // Kalimatnya dari aturannya sendiri: positif berarti beban maksimum BELUM
+      // terlampaui, negatif berarti SUDAH. Tak ada penggolongan lain di sana.
+      const nama = nilai < 0 ? "Beban maksimum terlampaui" : "Masih ada daya tampung";
+      const putih = DT_PUTIH[dtIndeks(nilai)];
       warna = bg;
       let rinci = "";
       try {
@@ -1359,7 +1365,8 @@ async function openPoint(lat, lon, label) {
                `<div class="pp-kritis">ton/tahun, Permen LH No. 5</div>${rinci}`;
     }
     const pita = key === "ispu" ? ISPU_KAT.map(([batas, , col]) => [batas, col])
-      : parDT ? dtAmbang(parDT).map((b, k) => [b, DT_WARNA[k]]).concat([[Infinity, DT_WARNA[4]]])
+      // Dua pita saja, dipisah di NOL. Itu satu-satunya batas yang punya dasar.
+      : parDT ? [[0, "#ff4c4c"], [Infinity, "#4cff4c"]]
       : null;
     const baku = bakuMutuLayer(key, !!pd.meta.daily);
     // AOD memang tak bersatuan, tapi sumbu tanpa keterangan sama sekali bikin
@@ -1378,8 +1385,21 @@ async function openPoint(lat, lon, label) {
 function closePoint() {
   if (pointPopup) { map.closePopup(pointPopup); pointPopup = null; }
   sharedPoint = null;
+  popupLabel = null;
   updateHash();
 }
+
+// Popup juga bisa ditutup lewat tombol X bawaan Leaflet atau tombol Escape, dan
+// jalur itu TIDAK melewati closePoint(). Tanpa penangan ini `pointPopup` tetap
+// terisi, lalu setActiveLayer menghidupkannya kembali begitu parameter diganti:
+// titik yang sudah ditutup muncul lagi sendiri.
+map.on("popupclose", (e) => {
+  if (e.popup !== pointPopup) return;
+  pointPopup = null;
+  sharedPoint = null;
+  popupLabel = null;
+  updateHash();
+});
 function hidePoint() { closePoint(); }
 function reopenPoint() {}
 
@@ -1588,13 +1608,25 @@ function loadCityData() {
 // Satu nilai, sudah dikembalikan ke satuan aslinya.
 function cityRaw(key, i, ti) {
   const a = cityData && cityData.data[key];
-  if (!a || !a[i] || a[i][ti] === undefined) return NaN;
+  // null = parameter itu belum punya nilai di langkah ini (mis. ISPU saat jendela
+  // 24 jam belum genap). Harus jadi NaN, bukan 0, kalau tidak labelnya menampilkan
+  // angka nol yang seolah terukur.
+  if (!a || !a[i] || a[i][ti] == null) return NaN;
   return a[i][ti] * cityData.scales[key];
 }
 
 // Satuan per parameter untuk label kota. Pakai SIMBOL, bukan kata.
 // Derajat & persen menempel ke angka, sisanya diberi spasi (31°C, 88%, 12 kt).
+const UGM = "\u00b5g/m\u00b3";
 const CITY_UNIT = {
+  ispu: { u: "", d: 0 },
+  pm25: { u: UGM, d: 0 }, pm10: { u: UGM, d: 0 }, co: { u: UGM, d: 0 },
+  no2: { u: UGM, d: 1 }, so2: { u: UGM, d: 1 }, o3: { u: UGM, d: 0 },
+  aod: { u: "", d: 2 }, pbl: { u: "m", d: 0 },
+  // Daya tampung dibaca dalam RIBU ton/tahun. Angka aslinya puluhan ribu sampai
+  // jutaan, terlalu panjang untuk label yang menumpuk di bawah nama kota.
+  dt_pm25: { u: "t/th", d: 0, bagi: 1000, sfx: "K" }, dt_pm10: { u: "t/th", d: 0, bagi: 1000, sfx: "K" },
+  dt_so2: { u: "t/th", d: 0, bagi: 1000, sfx: "K" }, dt_no2: { u: "t/th", d: 0, bagi: 1000, sfx: "K" },
   wind_surface: { u: "kt", d: 0 },
   rain_surface: { u: "mm", d: 1 },
   rain_accum_surface: { u: "mm", d: 0 },
@@ -1605,7 +1637,11 @@ const CITY_UNIT = {
   storm_potential: { u: "J/kg", d: 0 },
   cin_surface: { u: "J/kg", d: 0 },
 };
-const CITY_VAR = { wind_surface: "wind", rain_surface: "rain", temp_surface: "temp",
+// Untuk parameter Kertas Emisi, kunci layer SAMA dengan kunci variabelnya.
+const CITY_VAR = { ispu: "ispu", pm25: "pm25", pm10: "pm10", co: "co", no2: "no2",
+                   so2: "so2", o3: "o3", aod: "aod", pbl: "pbl",
+                   dt_pm25: "dt_pm25", dt_pm10: "dt_pm10", dt_so2: "dt_so2", dt_no2: "dt_no2",
+                   wind_surface: "wind", rain_surface: "rain", temp_surface: "temp",
                    humidity_surface: "humidity", cloud_surface: "cloud",
                    pressure_surface: "pressure", storm_potential: "cape",
                    cin_surface: "cin" };
@@ -1625,11 +1661,16 @@ function cityValueText(i, ti) {
     v = cityRaw(CITY_VAR[activeLayer], i, ti);
   }
   if (!isFinite(v)) return "";
+  if (s.bagi) v /= s.bagi;
   // Hujan per jam angkanya kecil, jadi 1 desimal. Tapi "0.0 mm" di seluruh peta
   // cuma jadi sampah visual, dan di atas 10 mm desimalnya tak berguna.
   const dec = (activeLayer === "rain_surface" && (v < 0.05 || v >= 10)) ? 0 : s.d;
-  const sep = (s.u === "\u00b0C" || s.u === "%") ? "" : " ";
-  return v.toFixed(dec) + sep + s.u;
+  const sep = (s.u === "\u00b0C" || s.u === "%" || s.u === "") ? "" : " ";
+  // Ribuan diberi pemisah supaya 142167 tak terbaca sebagai deretan angka acak.
+  const angka = Math.abs(v) >= 1000
+    ? v.toLocaleString("id-ID", { minimumFractionDigits: dec, maximumFractionDigits: dec })
+    : v.toFixed(dec);
+  return angka + (s.sfx || "") + sep + s.u;
 }
 
 // Nama untuk DI PETA saja, biar label pendek. Judul panel titik & tooltip tetap
@@ -1672,16 +1713,23 @@ async function refreshCityIcons() {
   cands.sort((a, c) => a.p.tier - c.p.tier || c.cond.sev - a.cond.sev);
   cityGroup.clearLayers();
   // Kotak anti-tabrakan LEBIH LEBAR dari ikon, karena ada nama + nilai di bawahnya.
-  // Kalau tetap 32px, labelnya saling tindih dan tak terbaca. Tanpa ikon, tumpukannya
-  // lebih pendek jadi jarak tegaknya boleh lebih rapat.
-  const placed = [], RX = 68, RY = cityIconsOn ? 44 : 34;
+  // Lebarnya dihitung dari ISI labelnya, bukan dipatok satu angka: nama panjang
+  // seperti "Kota Gorontalo" dan nilai panjang seperti "-13 rb t/th" butuh ruang
+  // jauh lebih besar daripada "Ambon 43", dan patokan tetap membuat keduanya
+  // tetap ditempatkan lalu saling tindih.
+  const RY = cityIconsOn ? 44 : 34;
+  const setengahLebar = (c) =>
+    Math.max(28, 3.3 * cityShortName(c.p.n).length, 3.7 * (c.val || "").length) + 6;
+  const placed = [];
   for (const c of cands) {
     const pt = map.latLngToContainerPoint([c.p.lat, c.p.lon]);
+    const w = setengahLebar(c);
     let ok = true;
     for (let i = 0; i < placed.length; i++)
-      if (Math.abs(pt.x - placed[i].x) < RX && Math.abs(pt.y - placed[i].y) < RY) { ok = false; break; }
+      if (Math.abs(pt.x - placed[i].x) < w + placed[i].w &&
+          Math.abs(pt.y - placed[i].y) < RY) { ok = false; break; }
     if (!ok) continue;
-    placed.push(pt);
+    placed.push({ x: pt.x, y: pt.y, w });
     const ico = cityIconsOn
       ? `<span class="cc-ico ${c.cond.cls}${c.p.tier === 0 ? " cc-cap" : ""}">` +
         `<span class="material-symbols-outlined">${c.cond.icon}</span></span>`
