@@ -728,6 +728,9 @@ function skewtSkeleton() {
 
 // Render (atau re-render) kartu Skew-T ke #pt-skewt-wrap untuk titik & waktu aktif.
 async function renderSkewTCard() {
+  // skewt.js dibuang di Kertas Emisi (profil termodinamika tak ada kaitannya dengan
+  // polutan). Kartunya juga disembunyikan lewat CSS, tapi jaga-jaga kalau terpanggil.
+  if (!window.SkewT) return;
   const wrap = $("pt-skewt-wrap");
   if (!wrap || !lastPoint) return;
   wrap.innerHTML = skewtSkeleton();
