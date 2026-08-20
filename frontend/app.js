@@ -464,8 +464,9 @@ function setActiveLayer(layerKey) {
   showFrame(current);
   syncIsobars();                 // isobar auto muncul/lepas mengikuti layer Tekanan
   // panel titik ikut variabel aktif
-  if (pointData && lastPoint && $("point-panel")?.classList.contains("open"))
-    renderPoint(pointData, lastPoint.lat, lastPoint.lon);
+  // Popup ikut digambar ulang saat slider atau parameter berubah, jadi penanda
+  // "waktu sekarang" di plot selalu sejajar dengan yang tampil di peta.
+  if (pointPopup) { const ll = pointPopup.getLatLng(); openPoint(ll.lat, ll.lng, popupLabel); }
   updateHash();
 }
 
@@ -518,7 +519,6 @@ async function showFrame(i) {
   if (cyclonesOn) refreshCyclones();     // siklon + jalur ikut waktu aktif
   if (itczOn) refreshItcz();             // zona ITCZ ikut waktu aktif
   if (activeLayer === "pressure_surface") refreshIsobars();   // isobar ikut waktu aktif
-  if (skewtOpen && lastPoint && $("point-panel")?.classList.contains("open")) renderSkewTCard();
   updateHash();
 }
 
@@ -932,238 +932,150 @@ function chartLegend(color) {
     `<span class="chl-key">${line(true)}<i>Forecast</i></span></div>`;
 }
 
-async function openPoint(lat, lon, label, isMe) {
-  ++pointToken; // titik baru → batalkan reverse-geocode titik sebelumnya
-  const pp = $("point-panel");
-  if (pp) { pp.classList.add("open"); pp.classList.remove("hidden"); }
-  $("pt-reopen")?.classList.remove("show");
-  // Marker: ikon "orang" (kamu di sini) utk geolokasi, belah-ketupat utk titik lain.
-  if (pointMarker) map.removeLayer(pointMarker);
-  const html = isMe
-    ? '<span class="pm-me"><span class="material-symbols-outlined">person</span></span>'
-    : '<span class="pm-diamond"></span>';
-  const sz = isMe ? 32 : 20;
-  pointMarker = L.marker([lat, lon], {
-    icon: L.divIcon({ className: "point-mark", html, iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2] }),
-    interactive: false, pane: "labels",
-  }).addTo(map);
-  setPointLabel(label || fmtCoord(lat, lon), label ? "addr" : "coord");
+// ================= POPUP TITIK =================
+// Kertas Cuaca memakai sidebar kanan. Di sini diganti POPUP tepat di titik yang
+// diklik, seperti Kertas Fenomena. Isinya satu hal saja: plot deret waktu parameter
+// yang sedang aktif. Sumbu X waktu, sumbu Y konsentrasi.
+
+let seriesMeta = null;       // isi point_meta.json, dimuat sekali
+let seriesCache = {};        // key layer -> {meta, arr}
+let pointPopup = null;
+let popupLabel = null;   // nama kota kalau titiknya dari klik label kota
+
+async function loadSeries(key) {
+  if (seriesCache[key]) return seriesCache[key];
+  if (!seriesMeta) {
+    seriesMeta = await fetch(DATA_BASE + "point_meta.json").then((r) => r.json());
+  }
+  const m = seriesMeta[key];
+  if (!m) throw new Error("deret titik tak ada untuk " + key);
+  const gz = await fetch(DATA_BASE + m.file).then((r) => r.arrayBuffer());
+  const stream = new Blob([gz]).stream().pipeThrough(new DecompressionStream("gzip"));
+  const buf = await new Response(stream).arrayBuffer();
+  seriesCache[key] = { meta: m, arr: new Int16Array(buf) };
+  return seriesCache[key];
+}
+
+// Sampel bilinear deret waktu di satu titik. Grid baris-0 = utara.
+function sampleSeries(pd, lat, lon) {
+  const { nx, ny, west, east, north, south, nt, scale } = pd.meta;
+  const dx = (east - west) / (nx - 1), dy = (north - south) / (ny - 1);
+  const fx = Math.max(0, Math.min(nx - 1, (lon - west) / dx));
+  const fy = Math.max(0, Math.min(ny - 1, (north - lat) / dy));
+  const x0 = Math.floor(fx), x1 = Math.min(x0 + 1, nx - 1), tx = fx - x0;
+  const y0 = Math.floor(fy), y1 = Math.min(y0 + 1, ny - 1), ty = fy - y0;
+  const out = [];
+  for (let t = 0; t < nt; t++) {
+    const b = t * nx * ny;
+    const A = pd.arr[b + y0 * nx + x0], B = pd.arr[b + y0 * nx + x1];
+    const C = pd.arr[b + y1 * nx + x0], D = pd.arr[b + y1 * nx + x1];
+    out.push(((1 - tx) * (1 - ty) * A + tx * (1 - ty) * B +
+              (1 - tx) * ty * C + tx * ty * D) * scale);
+  }
+  return out;
+}
+
+// Plot garis sederhana. Sengaja tanpa pustaka grafik: satu SVG, mudah dibaca,
+// dan tak menambah beban unduh.
+function seriesPlotSVG(vals, times, unit, daily, warna) {
+  const n = vals.length;
+  if (!n) return "";
+  const W = 300, H = 150, padL = 42, padR = 8, padT = 10, padB = 24;
+  const pw = W - padL - padR, ph = H - padT - padB, y0 = padT + ph;
+  const vmax = Math.max(...vals), vmin = Math.min(...vals);
+  // Dasar sumbu selalu 0: konsentrasi itu besaran mutlak, memotong dasarnya
+  // membuat kenaikan kecil terlihat dramatis padahal tidak.
+  const hi = vmax <= 0 ? 1 : vmax * 1.15, lo = 0;
+  const X = (i) => padL + (n === 1 ? pw / 2 : (i / (n - 1)) * pw);
+  const Y = (v) => y0 - ((v - lo) / (hi - lo)) * ph;
+  const garis = vals.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("");
+  const area = `M${X(0).toFixed(1)},${y0} ` +
+    vals.map((v, i) => `L${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("") +
+    ` L${X(n - 1).toFixed(1)},${y0} Z`;
+
+  // Sumbu Y: tiga label saja biar tak sesak.
+  let sy = "";
+  for (let k = 0; k <= 2; k++) {
+    const v = lo + (hi - lo) * (k / 2), y = Y(v);
+    const lab = v === 0 ? "0"
+      : v >= 100 ? Math.round(v) : v >= 10 ? v.toFixed(0) : v.toFixed(v >= 1 ? 1 : 2);
+    sy += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W - padR}" y2="${y.toFixed(1)}" class="pp-grid"/>` +
+          `<text x="${padL - 5}" y="${(y + 3.5).toFixed(1)}" class="pp-ytick">${lab}</text>`;
+  }
+  // Sumbu X: maksimum 4 label, format ikut cadence.
+  let sx = "";
+  const step = Math.max(1, Math.ceil(n / 4));
+  for (let i = 0; i < n; i += step) {
+    const w = toWIB(times[i]);
+    const lab = daily
+      ? `${w.getUTCDate()} ${MONTHS_ID[w.getUTCMonth()]}`
+      : `${String(w.getUTCHours()).padStart(2, "0")}:00`;
+    // Label pertama & terakhir dirapatkan ke tepi, kalau tetap di tengah ujungnya terpotong.
+    const anc = i === 0 ? "start" : (i + step >= n ? "end" : "middle");
+    const gx = i === 0 ? padL : (anc === "end" ? W - padR : X(i));
+    sx += `<text x="${gx.toFixed(1)}" y="${H - 7}" class="pp-xtick" style="text-anchor:${anc}">${lab}</text>`;
+  }
+  // Penanda waktu yang sedang tampil di peta.
+  let now = "";
+  const ci = nearestIndex(times, frames[current] && frames[current].valid_time);
+  if (ci >= 0) {
+    now = `<line x1="${X(ci).toFixed(1)}" y1="${padT}" x2="${X(ci).toFixed(1)}" y2="${y0}" class="pp-now"/>` +
+          `<circle cx="${X(ci).toFixed(1)}" cy="${Y(vals[ci]).toFixed(1)}" r="3.5" class="pp-dot"/>`;
+  }
+  const kini = ci >= 0 ? vals[ci] : vals[0];
+  const angka = kini >= 100 ? Math.round(kini) : kini >= 10 ? kini.toFixed(1) : kini.toFixed(2);
+  return `<div class="pp-head"><b>${angka}</b><span>${unit || ""}</span></div>` +
+    `<svg class="pp-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">` +
+    `${sy}<path d="${area}" fill="${warna}" opacity=".18"/>` +
+    `<path d="${garis}" fill="none" stroke="${warna}" stroke-width="2"/>${now}${sx}</svg>`;
+}
+
+function nearestIndex(times, vt) {
+  if (!vt || !times || !times.length) return -1;
+  const t = new Date(vt).getTime();
+  let bi = 0, bd = Infinity;
+  for (let i = 0; i < times.length; i++) {
+    const d = Math.abs(new Date(times[i]).getTime() - t);
+    if (d < bd) { bd = d; bi = i; }
+  }
+  return bi;
+}
+
+const PARAM_NAMA = { pm25: "PM2.5", pm10: "PM10", co: "CO", no2: "NO2",
+                     so2: "SO2", o3: "O3", aod: "Kabut Asap" };
+
+async function openPoint(lat, lon, label) {
+  const key = activeLayer;
+  if (!key) return;
+  popupLabel = label || null;
   sharedPoint = { lat, lon, name: label || null };
   updateHash();
-  const body = $("pt-body"); if (body) body.innerHTML = pointSkeleton();
+  const judul = label || fmtCoord(lat, lon);
+  if (pointPopup) map.closePopup(pointPopup);
+  pointPopup = L.popup({ className: "pt-pop", maxWidth: 330, autoPan: true, closeOnClick: false })
+    .setLatLng([lat, lon])
+    .setContent(`<div class="pp-title">${judul}</div><div class="pp-body">Memuat…</div>`)
+    .openOn(map);
   try {
-    renderPoint(await loadPointData(), lat, lon);
+    const pd = await loadSeries(key);
+    const vals = sampleSeries(pd, lat, lon);
+    const warna = (LEGENDS[key]?.cells?.[1]?.[1]) || "#35c84a";
+    const isi = `<div class="pp-title">${judul}<span class="pp-par">${PARAM_NAMA[key] || key}</span></div>` +
+      `<div class="pp-body">${seriesPlotSVG(vals, pd.meta.times, pd.meta.units, pd.meta.daily, warna)}</div>`;
+    if (pointPopup) pointPopup.setContent(isi);
   } catch (e) {
-    if (body) body.innerHTML = '<div class="pt-loading">Gagal memuat data titik.</div>';
     console.error(e);
+    if (pointPopup) pointPopup.setContent(`<div class="pp-title">${judul}</div><div class="pp-body">Data titik gagal dimuat.</div>`);
   }
-}
-
-// Skeleton panel titik: tulang shimmer per-kontainer (ringkasan, chip, kartu
-// 3-hari, grafik, tabel) meniru layout renderPoint — dipakai saat data dimuat.
-function pointSkeleton() {
-  const bar = (cls, w) => `<span class="sk-bar${cls ? " " + cls : ""}"${w ? ` style="width:${w}"` : ""}></span>`;
-  return '<div class="pt-skel">' +
-    `<div class="pt-skel-lines">${bar("", "100%")}${bar("", "94%")}${bar("", "60%")}</div>` +
-    `<div class="pt-skel-chips">${bar()}${bar()}</div>` +
-    bar("pt-skel-sec") +
-    `<div class="pt-skel-cards">${bar()}${bar()}${bar()}</div>` +
-    bar("pt-skel-sec") +
-    bar("pt-skel-chart") +
-    bar("pt-skel-sec") +
-    `<div class="pt-skel-rows">${bar("", "100%")}${bar("", "100%")}${bar("", "100%")}${bar("", "100%")}${bar("", "100%")}</div>` +
-    '</div>';
-}
-
-// ---- Ringkasan awam untuk panel titik --------------------------------
-function hhWIB(iso) { const w = toWIB(iso); return String(w.getUTCHours()).padStart(2, "0") + ":00"; }
-function windWord(kt) { return kt < 7 ? "tenang" : kt < 17 ? "sedang" : kt < 28 ? "kencang" : "sangat kencang"; }
-
-// Suhu TERASA (apparent temperature, rumus BOM Australia) dari suhu(°C) +
-// kelembapan(%) + angin(knot). Di iklim tropis lembap umumnya lebih PANAS dari
-// suhu asli karena keringat sulit menguap. e = tekanan uap air (hPa).
-function feelsLike(tC, rh, spdKt) {
-  const e = (rh / 100) * 6.105 * Math.exp((17.27 * tC) / (237.7 + tC));
-  const ws = (spdKt || 0) / MS_TO_KT; // knot -> m/s
-  return tC + 0.33 * e - 0.70 * ws - 4.0;
-}
-
-// Kalimat bahasa manusia: kondisi kini + hujan mendatang + angin.
-function pointSummary(times, temp, rain, cloud, wind, rh, ci) {
-  const now = cityCondition(rain[ci], cloud[ci]);
-  let s = `Saat ini <b>${now.label}</b>`;
-  if (temp) {
-    const t = Math.round(temp[ci]);
-    s += `, ${t}°C`;
-    if (rh && wind) {
-      const fl = Math.round(feelsLike(temp[ci], rh[ci], wind[ci].spd));
-      if (Math.abs(fl - t) >= 1) s += ` <span class="feels">(terasa ${fl}°)</span>`;
-    }
-  }
-  s += ".";
-  if (rain[ci] >= 0.5) {
-    let stop = -1;
-    for (let i = ci + 1; i < times.length; i++) if (rain[i] < 0.5) { stop = i; break; }
-    s += stop > 0 ? ` Hujan diperkirakan mereda sekitar <b>${hhWIB(times[stop])} WIB</b>.`
-                  : " Hujan diperkirakan masih berlanjut beberapa jam.";
-  } else {
-    let onset = -1;
-    for (let i = ci + 1; i < times.length; i++) if (rain[i] >= 0.5) { onset = i; break; }
-    s += onset > 0 ? ` Hujan diperkirakan mulai sekitar <b>${hhWIB(times[onset])} WIB</b>.`
-                   : " Tidak ada hujan berarti dalam beberapa jam ke depan.";
-  }
-  if (wind) s += ` Angin ${windWord(wind[ci].spd)}.`;
-  return s;
-}
-
-// Saran aktivitas dari kondisi ~12 jam ke depan (chip yang relevan saja).
-function pointAdvice(times, rain, cloud, wind, ci) {
-  const to = Math.min(times.length, ci + 5), dry6To = Math.min(times.length, ci + 3);
-  let maxRain = 0, storm = false, strongWind = false, dry6 = true;
-  for (let i = ci; i < to; i++) {
-    maxRain = Math.max(maxRain, rain[i]);
-    if (rain[i] >= 20) storm = true;
-    if (wind && wind[i].spd >= 22) strongWind = true;
-    if (i < dry6To && rain[i] >= 0.5) dry6 = false;
-  }
-  const chips = [];
-  if (maxRain >= 0.5) chips.push(["umbrella", "cc-rain", "Bawa payung"]);
-  if (storm) chips.push(["thunderstorm", "cc-storm", "Waspada petir"]);
-  if (maxRain >= 10 || strongWind) chips.push(["two_wheeler", "cc-heavy", "Hati-hati berkendara"]);
-  if (dry6 && cloud[ci] < 85) chips.push(["dry_cleaning", "cc-sunny", "Aman jemur"]);
-  if (!chips.length) chips.push(["check_circle", "cc-pcloud", "Cuaca bersahabat"]);
-  return chips.map(([ic, cls, txt]) =>
-    `<span class="adv-chip ${cls}"><span class="material-symbols-outlined">${ic}</span>${txt}</span>`).join("");
-}
-
-// Potensi badai/petir dari CAPE (energi labil). Ambang konvektif yang lazim.
-function stormLevel(c) {
-  if (c >= 3000) return ["Ekstrem", "cc-storm", "thunderstorm", "atmosfer sangat labil, potensi badai petir kuat"];
-  if (c >= 1800) return ["Tinggi", "cc-heavy", "bolt", "berpotensi badai dan petir"];
-  if (c >= 1000) return ["Sedang", "cc-rain", "cloud", "awan hujan bisa tumbuh"];
-  return ["Rendah", "cc-sunny", "wb_sunny", "atmosfer relatif stabil"];
-}
-function stormChip(cape, ci) {
-  if (!cape) return "";
-  const c = Math.round(cape[ci]);
-  const [lvl, cls, ic, note] = stormLevel(c);
-  return `<div class="pt-storm"><span class="adv-chip ${cls}"><span class="material-symbols-outlined">${ic}</span>Potensi badai: ${lvl}</span>` +
-         `<span class="pt-storm-note">CAPE ${c} J/kg, ${note}</span></div>`;
-}
-
-// Kartu prakiraan harian (maks 3 hari): ikon dominan + suhu maks/min + hujan total.
-function dailyCards(times, temp, rain, cloud, ci) {
-  const days = {}, fromDate = times[ci].slice(0, 10); // mulai dari hari frame aktif (bukan masa lalu)
-  for (let i = 0; i < times.length; i++) {
-    const d = times[i].slice(0, 10);
-    if (d < fromDate) continue;
-    const o = days[d] || (days[d] = { tmax: -99, tmin: 99, peak: 0, rain: 0, cloud: 0, n: 0 });
-    if (temp) { o.tmax = Math.max(o.tmax, temp[i]); o.tmin = Math.min(o.tmin, temp[i]); }
-    o.peak = Math.max(o.peak, rain[i]); o.rain += rain[i] * 3; o.cloud += cloud[i]; o.n++;
-  }
-  return Object.keys(days).sort().slice(0, 3).map((d) => {
-    const o = days[d], cond = cityCondition(o.peak, o.cloud / o.n);
-    const base = new Date(d + "T00:00:00Z");
-    const wd = base.toLocaleDateString("id-ID", { weekday: "short", timeZone: "UTC" });
-    const dm = base.toLocaleDateString("id-ID", { day: "numeric", month: "short", timeZone: "UTC" });
-    return `<div class="fc-card"><div class="fc-day">${wd}<span>${dm}</span></div>` +
-      `<span class="cc-ico cc-mini ${cond.cls}"><span class="material-symbols-outlined">${cond.icon}</span></span>` +
-      `<div class="fc-temp">` + (temp
-        ? `<span class="material-symbols-outlined ft-ico">device_thermostat</span>` +
-          `<span class="t-max">${Math.round(o.tmax)}°</span>` +
-          `<span class="t-min">${Math.round(o.tmin)}°</span>`
-        : "–") + `</div>` +
-      `<div class="fc-rain">${o.rain >= 1 ? Math.round(o.rain) + " mm" : "–"}</div></div>`;
-  }).join("");
-}
-
-function renderPoint(pd, lat, lon) {
-  const times = pd.meta.times;
-  const u = sampleVar(pd, "u", lat, lon), v = sampleVar(pd, "v", lat, lon);
-  const temp = sampleVar(pd, "temp", lat, lon), rain = sampleVar(pd, "rain", lat, lon);
-  const rh = sampleVar(pd, "humidity", lat, lon), cloud = sampleVar(pd, "cloud", lat, lon);
-  const pres = sampleVar(pd, "pressure", lat, lon), cape = sampleVar(pd, "cape", lat, lon);
-  const wind = u && v ? u.map((uu, i) => windAt(uu, v[i])) : null;
-  lastPoint = { lat, lon, times, temp, rain, wind, rh, cloud, pres };
-
-  let rows = "";
-  for (let i = 0; i < times.length; i++) {
-    rows += `<tr><td>${fmtHour(times[i])}</td>` +
-      `<td>${temp ? temp[i].toFixed(1) : "–"}</td>` +
-      `<td>${wind ? Math.round(wind[i].spd) + " " + wind[i].dir : "–"}</td>` +
-      `<td>${rain ? rain[i].toFixed(1) : "–"}</td>` +
-      `<td>${rh ? Math.round(rh[i]) : "–"}</td>` +
-      `<td>${cloud ? Math.round(cloud[i]) : "–"}</td>` +
-      `<td>${pres ? Math.round(pres[i]) : "–"}</td></tr>`;
-  }
-  const ci = currentTimeIndex(pd);
-  const extras =
-    `<div class="pt-summary">${pointSummary(times, temp, rain, cloud, wind, rh, ci)}</div>` +
-    `<div class="pt-advice">${pointAdvice(times, rain, cloud, wind, ci)}</div>` +
-    stormChip(cape, ci) +
-    `<div class="pt-sec">PRAKIRAAN 3 HARI</div><div class="fc-cards">${dailyCards(times, temp, rain, cloud, ci)}</div>`;
-  const spec = chartSeries(pd, lat, lon);
-  $("pt-body").innerHTML = extras +
-    `<div class="pt-sec">${spec.label.toUpperCase()} <span>${spec.unit}</span></div>${chartSVG(spec)}${chartLegend(spec.color)}` +
-    `<div class="pt-sec">DATA PER-JAM (WIB)</div>` +
-    `<div class="pt-table-wrap"><table class="pt-table"><thead><tr>` +
-    `<th>Tgl/Jam</th><th>°C</th><th>Angin</th><th>mm/j</th><th>RH%</th><th>Awan%</th><th>hPa</th>` +
-    `</tr></thead><tbody>${rows}</tbody></table></div>` +
-    // Kartu LANJUTAN: profil vertikal Skew-T (dimuat malas saat dibuka)
-    `<button type="button" class="pt-skewt-head${skewtOpen ? " open" : ""}" id="pt-skewt-toggle">` +
-    `<span class="skt-lead material-symbols-outlined">stacked_line_chart</span>` +
-    `<span class="skt-label">Profil Atmosfer · Skew-T</span>` +
-    `<span class="skt-caret material-symbols-outlined">expand_more</span></button>` +
-    `<div class="pt-skewt-wrap${skewtOpen ? " open" : ""}" id="pt-skewt-wrap"></div>`;
-
-  const tog = $("pt-skewt-toggle");
-  if (tog) tog.addEventListener("click", () => {
-    skewtOpen = !skewtOpen;
-    tog.classList.toggle("open", skewtOpen);
-    $("pt-skewt-wrap")?.classList.toggle("open", skewtOpen);
-    if (skewtOpen) {
-      renderSkewTCard();
-      // Jump: bawa kartu ke atas panel supaya profil mengisi layar (kondisi tergulir ke atas).
-      requestAnimationFrame(() => $("pt-skewt-toggle")?.scrollIntoView({ behavior: "smooth", block: "start" }));
-    } else { const w = $("pt-skewt-wrap"); if (w) w.innerHTML = ""; }
-  });
-  if (skewtOpen) renderSkewTCard();   // titik/waktu berubah saat kartu terbuka -> render ulang
-}
-
-function exportCSV() {
-  if (!lastPoint) return;
-  const p = lastPoint;
-  let csv = "waktu_wib,suhu_C,angin_kt,arah,hujan_mmjam,kelembapan_pct,awan_pct,tekanan_hpa\n";
-  for (let i = 0; i < p.times.length; i++) {
-    const w = toWIB(p.times[i]);
-    const wib = `${w.getUTCFullYear()}-${String(w.getUTCMonth() + 1).padStart(2, "0")}-${String(w.getUTCDate()).padStart(2, "0")} ${String(w.getUTCHours()).padStart(2, "0")}:00`;
-    csv += [wib, p.temp ? p.temp[i].toFixed(1) : "", p.wind ? Math.round(p.wind[i].spd) : "",
-            p.wind ? p.wind[i].dir : "", p.rain ? p.rain[i].toFixed(1) : "",
-            p.rh ? Math.round(p.rh[i]) : "", p.cloud ? Math.round(p.cloud[i]) : "",
-            p.pres ? Math.round(p.pres[i]) : ""].join(",") + "\n";
-  }
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-  a.download = `titik_${p.lat.toFixed(2)}_${p.lon.toFixed(2)}.csv`;
-  a.click();
-  URL.revokeObjectURL(a.href);
 }
 
 function closePoint() {
-  $("point-panel")?.classList.remove("open", "hidden");
-  $("pt-reopen")?.classList.remove("show");
-  if (pointMarker) { map.removeLayer(pointMarker); pointMarker = null; }
+  if (pointPopup) { map.closePopup(pointPopup); pointPopup = null; }
   sharedPoint = null;
   updateHash();
 }
-function hidePoint() {           // sembunyikan panel, marker & data tetap
-  $("point-panel")?.classList.add("hidden");
-  $("pt-reopen")?.classList.add("show");
-}
-function reopenPoint() {
-  $("point-panel")?.classList.remove("hidden");
-  $("pt-reopen")?.classList.remove("show");
-}
+function hidePoint() { closePoint(); }
+function reopenPoint() {}
 
 // ================= FRESHNESS · SHARE · TOAST =================
 // Waktu inisiasi model (run_time GFS) dalam WIB — jam & tanggal. Kredibilitas:

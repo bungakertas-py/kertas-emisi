@@ -984,3 +984,29 @@ html, body {
 /* Tombol parameter dimatikan selama data belum ada. */
 .layer-btn.disabled, .layer-btn:disabled { opacity: .45; cursor: not-allowed; }
 .layer-btn.disabled:hover { background: var(--surface); }
+
+
+/* ---- Popup titik (pengganti sidebar kanan Kertas Cuaca) ---- */
+.pt-pop .leaflet-popup-content-wrapper {
+  background: var(--surface); color: var(--ink);
+  border: var(--bw) solid var(--ink); border-radius: 0; box-shadow: var(--shadow);
+  padding: 0;
+}
+.pt-pop .leaflet-popup-content { margin: 0; width: auto !important; }
+.pt-pop .leaflet-popup-tip { background: var(--surface); border: var(--bw) solid var(--ink); }
+.pt-pop .leaflet-popup-close-button { color: var(--ink); font-size: 20px; padding: 6px 8px 0 0; }
+.pp-title {
+  font-family: var(--font-display); font-size: 13px; padding: 9px 30px 7px 12px;
+  border-bottom: var(--bw) solid var(--ink); display: flex; align-items: baseline; gap: 8px;
+}
+.pp-par { font-family: var(--font-mono); font-size: 10px; color: var(--variant); letter-spacing: .04em; }
+.pp-body { padding: 8px 10px 6px; }
+.pp-head { display: flex; align-items: baseline; gap: 5px; padding: 0 2px 4px; }
+.pp-head b { font-family: var(--font-display); font-size: 22px; line-height: 1; }
+.pp-head span { font-family: var(--font-mono); font-size: 10px; color: var(--variant); }
+.pp-svg { display: block; }
+.pp-grid { stroke: #d8dde3; stroke-width: 1; }
+.pp-ytick { font-family: var(--font-mono); font-size: 8.5px; fill: var(--variant); text-anchor: end; }
+.pp-xtick { font-family: var(--font-mono); font-size: 8.5px; fill: var(--variant); text-anchor: middle; }
+.pp-now { stroke: #e8590c; stroke-width: 1.2; stroke-dasharray: 3 3; }
+.pp-dot { fill: #e8590c; }

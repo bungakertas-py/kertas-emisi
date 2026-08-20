@@ -502,6 +502,31 @@ def write_point_data(series: dict, times: list, grid: dict, out_dir: Path = OUTP
     return (out_dir / "point_data.bin.gz").stat().st_size
 
 
+# ================= Deret waktu per TITIK (buat plot di popup) =================
+# Satu berkas biner per parameter: (nwaktu, ny, nx) int16 gzip. Frontend menyampel
+# bilinear di titik yang diklik lalu menggambar plot. Skalanya beda-beda karena
+# rentang parameternya jauh berbeda (CO bisa 100.000, AOD cuma 6).
+_PD_SCALE = {"pm25": 1.0, "pm10": 1.0, "co": 10.0, "no2": 0.1,
+             "so2": 0.1, "o3": 0.1, "aod": 0.001}
+
+
+def write_point_series(key: str, medan: list, waktu: list, grid: dict,
+                       out_dir: Path = OUTPUT_DIR) -> dict:
+    """Tulis pd_<key>.bin.gz + kembalikan metanya."""
+    skala = _PD_SCALE.get(key, 1.0)
+    tumpuk = np.stack([np.nan_to_num(m) for m in medan]).astype("float64")
+    # int16 dibatasi +-32767. Nilai di luar jangkauan dipotong, bukan dibiarkan
+    # membungkus jadi angka negatif yang menyesatkan.
+    stored = np.clip(np.round(tumpuk / skala), -32767, 32767).astype("<i2")
+    nama = f"pd_{key}.bin.gz"
+    (out_dir / nama).write_bytes(gzip.compress(stored.tobytes(order="C"), compresslevel=6))
+    return {"file": nama, "scale": skala, "nt": len(waktu),
+            "nx": grid["width"], "ny": grid["height"],
+            "west": grid["west"], "east": grid["east"],
+            "north": grid["north"], "south": grid["south"],
+            "times": waktu}
+
+
 # ================= Nilai per KOTA (buat label di peta) =================
 # Label kota cuma butuh nilai di 514 titik, bukan seluruh grid 473x265. Kalau
 # frontend memakai point_data.bin.gz (21 MB) demi angka segitu, 99,6 persen isinya

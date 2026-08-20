@@ -18,7 +18,7 @@ import numpy as np
 import config as C
 from config import KEEP_PAST_HOURS, LAYERS, OUTPUT_DIR
 import cams
-from process import _export_velocity_json, write_scalar_frame
+from process import _export_velocity_json, write_point_series, write_scalar_frame
 
 
 def _parse(ts: str) -> dt.datetime:
@@ -169,6 +169,7 @@ def main() -> None:
            for i in range(len(jam_lead))]
     print(f"kerapatan udara: rata {np.mean([r.mean() for r in rho]):.3f} kg/m3")
 
+    point_meta = {}
     for key, lay in LAYERS.items():
         ds = ds_s if lay["src"] == "single" else ds_m
         uu = up if lay["src"] == "single" else up_m
@@ -182,15 +183,25 @@ def main() -> None:
             medan.append(a)
 
         if lay["daily"]:
-            n = _tulis_harian(key, lay, medan, jam_lead, run, grid, vel_nama)
+            n, seri, waktu = _tulis_harian(key, lay, medan, jam_lead, run, grid, vel_nama)
         else:
             n = _tulis_per_langkah(key, lay, medan, jam_lead, run, grid, vel_nama)
+            seri, waktu = medan, [(run + dt.timedelta(hours=h)).strftime("%Y-%m-%dT%H:00:00Z")
+                                  for h in jam_lead]
+        pm = write_point_series(key, seri, waktu, grid)
+        pm["units"] = lay["units"]
+        pm["daily"] = bool(lay["daily"])
+        point_meta[key] = pm
         rata = np.nanmean([m.mean() for m in medan])
         maks = np.nanmax([np.nanmax(m) for m in medan])
         sat = lay["units"] or "tanpa satuan"
         print(f"  {key:5} {n:>3} frame  rata {rata:9.3f}  maks {maks:10.2f}  {sat}")
 
     ds_s.close(); ds_m.close()
+    (OUTPUT_DIR / "point_meta.json").write_text(json.dumps(point_meta, indent=2))
+    tot = sum((OUTPUT_DIR / v["file"]).stat().st_size for v in point_meta.values())
+    print(f"deret titik: {len(point_meta)} berkas, {tot/1e6:.1f} MB")
+
     catalog, total = reconcile_and_catalog(run)
     (OUTPUT_DIR / "catalog.json").write_text(json.dumps(catalog, indent=2))
     print(f"\nSelesai. {total} frame, {len(catalog['layers'])} layer -> catalog.json")
@@ -212,11 +223,12 @@ def _tulis_harian(key, lay, medan, jam_lead, run, grid, vel_nama) -> int:
         vt = run + dt.timedelta(hours=fstep)
         tgl = (vt + dt.timedelta(hours=C.WIB)).date()      # kelompokkan menurut hari WIB
         hari.setdefault(tgl, []).append(i)
-    n = 0
+    n, seri, waktu = 0, [], []
     for tgl, idx in sorted(hari.items()):
         if len(idx) < 4:            # hari yang cuma kepotong sedikit -> lewati
             continue
         rerata = np.nanmean(np.stack([medan[i] for i in idx]), axis=0)
+        seri.append(rerata)
         # Waktu berlaku = tengah hari WIB, dalam UTC. Slider hanya menampilkan tanggal.
         valid = dt.datetime.combine(tgl, dt.time(12), tzinfo=dt.timezone.utc) - dt.timedelta(hours=C.WIB)
         tengah = idx[len(idx) // 2]
@@ -224,8 +236,9 @@ def _tulis_harian(key, lay, medan, jam_lead, run, grid, vel_nama) -> int:
                            extra={"model": "CAMS", "daily": True,
                                   "n_langkah": len(idx),
                                   "velocity_json": vel_nama[jam_lead[tengah]]})
+        waktu.append(valid.strftime("%Y-%m-%dT%H:00:00Z"))
         n += 1
-    return n
+    return n, seri, waktu
 
 
 if __name__ == "__main__":
