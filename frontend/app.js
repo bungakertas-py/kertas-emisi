@@ -22,7 +22,7 @@ const PALET = {
   aod:  { warna: ["#fc9f65", "#bd784c", "#7e5033", "#3f2819", "#000000"], putih: [0, 0, 1, 1, 1] },   // copper dibalik
   // PBL dibaca TERBALIK: warna pekat ada di nilai RENDAH, karena lapisan aduk yang
   // tipis mengurung emisi. Cermin _PBL_WARNA di process.py.
-  pbl:  { warna: ["#fcfdbf", "#fe9f6d", "#de4968", "#8c2981", "#3b0f70"], putih: [0, 0, 0, 1, 1] },   // magma dibalik
+  pbl:  { warna: ["#76195d", "#ae4060", "#d4776a", "#e6b7a2", "#fef6f5"], putih: [1, 1, 0, 0, 0] },   // cmocean curl_pink
 };
 
 // Kategori ISPU, Lampiran II Permen LHK 14/2020. [batas atas, nama, warna, teks putih]

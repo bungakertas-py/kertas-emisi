@@ -202,24 +202,41 @@ _AOD_SCALE = _skala(0.05, [0.2, 0.5, 1.0, 2.0, 3.0], _PALET["aod"])
 # mengkhawatirkan justru nilai RENDAH, karena lapisan aduk yang tipis mengurung
 # emisi di dekat tanah. Jadi yang menyala warna panas adalah yang rendah, dan yang
 # tinggi dibiarkan bening karena berarti udaranya lega dan tak perlu ditandai.
-# magma dibalik, diambil di posisi 1,00 turun ke 0,20. Ujung terangnya dipakai
-# untuk nilai RENDAH supaya yang mengkhawatirkan menyala di atas alas gelap, lalu
-# meredup ke ungu tua dan akhirnya bening di lapisan yang sudah lega.
-_PBL_WARNA = [(0xfc, 0xfd, 0xbf), (0xfe, 0x9f, 0x6d), (0xde, 0x49, 0x68),
-              (0x8c, 0x29, 0x81), (0x3b, 0x0f, 0x70)]
-_PBL_ALPHA = [235, 205, 170, 130, 70]
+# cmocean curl_pink, https://github.com/matplotlib/cmocean berkas
+# cmocean/rgb/curl-pink.py. Diambil di posisi 0,20 naik ke 1,00, konvensi sama
+# dengan palet polutan lain. Plum tua di nilai RENDAH lalu memudar ke nyaris
+# putih di lapisan yang sudah lega, dan akhirnya bening. cmocean sengaja TIDAK
+# jadi dependensi CI, nilainya dibekukan di sini seperti palet lainnya.
+_PBL_WARNA = [(0x76, 0x19, 0x5d), (0xae, 0x40, 0x60), (0xd4, 0x77, 0x6a),
+              (0xe6, 0xb7, 0xa2), (0xfe, 0xf6, 0xf5)]
+# RATA, tidak bertingkat seperti layer polutan. Di layer polutan kepekatan boleh
+# ikut naik bersama ambang, karena nilai rendah di sana memang berarti "nyaris tak
+# ada polutan" jadi wajar nyaris tak terlihat. PBLH tidak begitu, setiap sel selalu
+# punya nilai dan semuanya berarti. Kalau alphanya bertingkat, pita teratas di peta
+# jadi abu-abu dan tak lagi cocok dengan swatch legendanya.
+_PBL_ALPHA = [235, 235, 235, 235, 235]
 _PBL_AMBANG = [200, 400, 700, 1000, 1500]   # meter
 
 
-def _skala_terbalik(ambang, palet, alpha, pudar):
-    """Skala yang pekat di nilai RENDAH lalu memudar ke atas."""
+def _skala_terbalik(ambang, palet, alpha):
+    """Skala yang pekat di nilai RENDAH lalu meredup ke atas.
+
+    TIDAK ada ekor bening di ujung atas. Dulu ada, nilainya diturunkan ke alpha 0
+    di 2500 m dengan maksud "di atas ini udaranya lega jadi tak perlu ditandai".
+    Maksud itu tak sampai. Yang terlihat justru alas peta yang menembus dari
+    bawah, dan di alas gelap itu terbaca HITAM. Padahal hitam di aplikasi ini
+    sudah punya arti sendiri, yaitu Berbahaya di legenda ISPU. Jadi lapisan aduk
+    yang paling TEBAL, yang justru paling aman, malah tampak paling gawat.
+
+    Sekarang nilai di atas ambang teratas MENGIKUTI warna legenda paling atas,
+    sama seperti semua layer lain. Pita terakhir berarti "segini ke atas".
+    """
     out = [(0, (*palet[0], alpha[0]))]
     out += [(v, (*c, a)) for v, c, a in zip(ambang, palet, alpha)]
-    out += [(pudar, (*palet[-1], 0))]
     return out
 
 
-_PBL_SCALE = _skala_terbalik(_PBL_AMBANG, _PBL_WARNA, _PBL_ALPHA, 2500)
+_PBL_SCALE = _skala_terbalik(_PBL_AMBANG, _PBL_WARNA, _PBL_ALPHA)
 
 
 # ============ PROYEKSI: baris pratinjau harus MERCATOR, bukan lintang ============
