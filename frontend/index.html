@@ -344,8 +344,22 @@
 
     <div id="loading">Memuat data model…</div>
 
-    <!-- Panel detail titik (muncul saat klik peta) -->
-    <!-- sidebar titik dibuang: Kertas Emisi memakai popup di titik, lihat openPoint() -->
+    <!-- Panel detail titik. Layer polutan memakai popup kecil di titik (openPoint),
+         tapi layer daya tampung isinya terlalu panjang untuk popup, jadi khusus
+         layer itu detailnya masuk ke sidebar ini. -->
+    <aside id="point-panel">
+      <div class="pt-head">
+        <div class="pt-head-top">
+          <div class="pt-sec" id="pt-kind"><span id="pt-par"></span></div>
+          <div class="pt-head-btns">
+            <button id="pt-hide" class="pt-close" title="Sembunyikan ke kanan"><span class="material-symbols-outlined">chevron_right</span></button>
+            <button id="pt-close" class="pt-close" title="Tutup"><span class="material-symbols-outlined">close</span></button>
+          </div>
+        </div>
+        <div class="pt-coords mono" id="pt-coords"></div>
+      </div>
+      <div class="pt-body" id="pt-body"></div>
+    </aside>
     <button id="pt-reopen" title="Tampilkan detail titik"><span class="material-symbols-outlined">chevron_left</span></button>
   </div>
 

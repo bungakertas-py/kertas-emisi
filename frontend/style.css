@@ -830,6 +830,22 @@ html, body {
 }
 #pt-reopen.show { display: flex; }
 
+/* Sidebar menutupi 380 px tepi kanan peta. Selama panel terbuka, seluruh lapisan
+   UI dipersempit segitu supaya kontrol kanan, legenda, dan slider tak tertimpa.
+   Kalau panel disembunyikan, kelasnya dilepas dan lebarnya balik seperti semula. */
+#stage.pt-open #ui { padding-right: 400px; }
+
+/* Isi detail titik dipakai bersama popup dan sidebar. Di sidebar ruangnya lebih
+   lega, jadi plot dan angkanya dibesarkan supaya tak terlihat kekecilan. */
+#point-panel .pp-svg { width: 100%; height: auto; }
+#point-panel .pp-ispu { padding: 10px 12px; margin-bottom: 10px; }
+#point-panel .pp-ispu b { font-size: 30px; }
+#point-panel .pp-ispu span { font-size: 12px; }
+#point-panel .pp-kritis { font-size: 11px; margin-bottom: 12px; }
+#point-panel .pp-rinci { font-size: 11px; margin-bottom: 12px; }
+#point-panel .pp-rinci div { padding: 4px 0; }
+#point-panel .pt-sec { margin: 0; gap: 8px; justify-content: flex-start; }
+
 /* ===================== SEARCH KOTA/KABUPATEN ===================== */
 .search-wrap { position: relative; pointer-events: auto; }
 .search-box {
@@ -996,6 +1012,7 @@ html, body {
 
   /* panel detail titik = full-screen */
   #point-panel { width: 100vw; max-width: 100vw; border-left: none; }
+  #stage.pt-open #ui { padding-right: 10px; }
   #pt-reopen { top: auto; bottom: 128px; transform: none; }
 
   /* kotak pencarian = full-width di bawah bar atas */

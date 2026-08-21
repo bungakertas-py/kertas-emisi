@@ -22,7 +22,7 @@ const PALET = {
   aod:  { warna: ["#fc9f65", "#bd784c", "#7e5033", "#3f2819", "#000000"], putih: [0, 0, 1, 1, 1] },   // copper dibalik
   // PBL dibaca TERBALIK: warna pekat ada di nilai RENDAH, karena lapisan aduk yang
   // tipis mengurung emisi. Cermin _PBL_WARNA di process.py.
-  pbl:  { warna: ["#d7191c", "#f46d43", "#fdae61", "#fee08b", "#ffffbf"], putih: [1, 0, 0, 0, 0] },
+  pbl:  { warna: ["#fcfdbf", "#fe9f6d", "#de4968", "#8c2981", "#3b0f70"], putih: [0, 0, 0, 1, 1] },   // magma dibalik
 };
 
 // Kategori ISPU, Lampiran II Permen LHK 14/2020. [batas atas, nama, warna, teks putih]
@@ -596,7 +596,12 @@ function setActiveLayer(layerKey) {
   // panel titik ikut variabel aktif
   // Popup ikut digambar ulang saat slider atau parameter berubah, jadi penanda
   // "waktu sekarang" di plot selalu sejajar dengan yang tampil di peta.
-  if (pointPopup) { const ll = pointPopup.getLatLng(); openPoint(ll.lat, ll.lng, popupLabel); }
+  // Titik aktif digambar ulang mengikuti parameter baru. Disalin dulu karena
+  // openPoint menutup popup lama, dan penutupan itu mengosongkan sharedPoint.
+  // Pindah dari layer daya tampung ke polutan (atau sebaliknya) sekalian
+  // memindahkan isinya antara sidebar dan popup.
+  const titik = sharedPoint;
+  if (titik) openPoint(titik.lat, titik.lon, titik.name, titik.me);
   updateHash();
 }
 
@@ -1294,96 +1299,181 @@ function nearestIndex(times, vt) {
   return bi;
 }
 
-async function openPoint(lat, lon, label) {
+// Layer daya tampung isinya jauh lebih panjang dari layer lain: angka besar,
+// kategori, empat baris rincian neraca, lalu plot. Di popup 330 px itu sudah
+// tak muat. Jadi khusus layer itu detailnya dibuka di sidebar kanan yang bisa
+// disembunyikan, sedangkan layer polutan tetap memakai popup di titiknya.
+const pakaiSidebar = (key) => !!key && key.startsWith("dt_");
+
+let sidebarTersembunyi = false;   // user menekan "sembunyikan", jangan dipaksa buka lagi
+
+function sidebarAktif() { return !!$("point-panel")?.classList.contains("open"); }
+
+function bukaSidebar(judul, par, koordinat) {
+  const pp = $("point-panel");
+  if (!pp) return;
+  setPointLabel(judul, koordinat ? "coord" : "addr");
+  const t = $("pt-par"); if (t) t.innerHTML = par || "";
+  pp.classList.add("open");
+  pp.classList.toggle("hidden", sidebarTersembunyi);
+  $("pt-reopen")?.classList.toggle("show", sidebarTersembunyi);
+  geserUI();
+}
+
+// Panel memakan 380 px tepi kanan peta. Kontrol kanan, legenda, dan slider ikut
+// digeser selama panel benar-benar terlihat, supaya tak ada yang tertimpa.
+function geserUI() {
+  const pp = $("point-panel");
+  const tampil = !!pp && pp.classList.contains("open") && !pp.classList.contains("hidden");
+  $("stage")?.classList.toggle("pt-open", tampil);
+}
+
+function isiSidebar(html) { const b = $("pt-body"); if (b) b.innerHTML = html; }
+
+function tutupSidebar() {
+  $("point-panel")?.classList.remove("open", "hidden");
+  $("pt-reopen")?.classList.remove("show");
+  geserUI();
+}
+
+// Popup duduk persis di titiknya jadi tak perlu penanda. Sidebar tidak, jadi
+// titik yang sedang dibaca harus ditandai sendiri di peta.
+function tandaTitik(lat, lon, isMe) {
+  hapusTanda();
+  const html = isMe
+    ? '<span class="pm-me"><span class="material-symbols-outlined">person</span></span>'
+    : '<span class="pm-diamond"></span>';
+  const sz = isMe ? 32 : 20;
+  pointMarker = L.marker([lat, lon], {
+    icon: L.divIcon({ className: "point-mark", html, iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2] }),
+    interactive: false, pane: "labels",
+  }).addTo(map);
+}
+
+function hapusTanda() {
+  if (pointMarker) { map.removeLayer(pointMarker); pointMarker = null; }
+}
+
+// Isi detail titik. Dipakai popup MAUPUN sidebar, jadi yang dikembalikan cuma
+// potongan isinya, bukan bungkusnya.
+async function badanTitik(key, lat, lon) {
+  const pd = await loadSeries(key);
+  const vals = sampleSeries(pd, lat, lon);
+  let warna = (LEGENDS[key]?.cells?.[1]?.[1]) || "#35c84a";
+  let kepala = "";
+  if (key === "ispu") {
+    // ISPU perlu dua hal lagi yang tak muat di plot: kategorinya, dan parameter
+    // mana yang bikin angkanya setinggi itu. Aturannya menyebut yang kedua
+    // "pencemar kritis", dan itu justru yang menentukan tindakan.
+    const i = Math.max(0, nearestIndex(pd.meta.times, frames[current] && frames[current].valid_time));
+    const nilai = Math.round(vals[i]);
+    const [, nama, bg, putih] = ispuKategori(nilai);
+    warna = bg;
+    let kritis = "";
+    try {
+      const pk = await loadSeries("ispu_kritis");
+      const kode = sampleSeriesNearest(pk, lat, lon);
+      const par = (pd.meta.kritis_param || [])[Math.round(kode[i])];
+      if (par) kritis = `<div class="pp-kritis">Pencemar kritis <b>${KIMIA_HTML[par] || par}</b></div>`;
+    } catch (e) { console.warn("pencemar kritis tak terbaca", e); }
+    kepala = `<div class="pp-ispu${putih ? " putih" : ""}" style="background:${bg}">` +
+             `<b>${nilai}</b><span>${nama}</span></div>${kritis}`;
+  }
+  const parDT = key.startsWith("dt_") ? key.slice(3) : null;
+  if (parDT) {
+    // Daya tampung: angka + kategori + pecahannya. BE max dan BE eks tak perlu
+    // disimpan sendiri, cukup volume udara per sel; BE max = V x BMUA, lalu
+    // BE eks = BE max - DT. Menghemat satu berkas deret per parameter.
+    const i = Math.max(0, nearestIndex(pd.meta.times, frames[current] && frames[current].valid_time));
+    const nilai = vals[i];
+    const bg = dtWarna(nilai);
+    // Kalimatnya dari aturannya sendiri: positif berarti beban maksimum BELUM
+    // terlampaui, negatif berarti SUDAH. Tak ada penggolongan lain di sana.
+    const nama = nilai < 0 ? "Beban maksimum terlampaui" : "Masih ada daya tampung";
+    const putih = DT_PUTIH[dtIndeks(nilai)];
+    warna = bg;
+    let rinci = "";
+    try {
+      const pv = await loadSeries("dt_vol");
+      const vol = sampleSeries(pv, lat, lon)[i];          // km3
+      if (isFinite(vol) && vol > 0) {
+        const bmua = BAKU_MUTU[parDT]["24 jam"];
+        const beMaxHari = (vol * 1e9) * bmua / 1e12;      // ton/hari
+        const beEksHari = beMaxHari - nilai / 365;
+        const r0 = (v) => Math.round(v).toLocaleString("id-ID");
+        rinci = `<div class="pp-rinci">` +
+          `<div><span>Volume udara</span><b>${r0(vol)} km³</b></div>` +
+          `<div><span>BE maksimum</span><b>${r0(beMaxHari * 365)} ton/th</b></div>` +
+          `<div><span>BE eksisting</span><b>${r0(beEksHari * 365)} ton/th</b></div>` +
+          `<div><span>BMUA 24 jam</span><b>${bmua} µg/m³</b></div></div>`;
+      }
+    } catch (e) { console.warn("volume udara tak terbaca", e); }
+    kepala = `<div class="pp-ispu${putih ? " putih" : ""}" style="background:${bg}">` +
+             `<b>${Math.round(nilai).toLocaleString("id-ID")}</b><span>${nama}</span></div>` +
+             `<div class="pp-kritis">ton/tahun, Permen LH No. 5</div>${rinci}`;
+  }
+  const pita = key === "ispu" ? ISPU_KAT.map(([batas, , col]) => [batas, col])
+    // Dua pita saja, dipisah di NOL. Itu satu-satunya batas yang punya dasar.
+    : parDT ? [[0, "#ff4c4c"], [Infinity, "#4cff4c"]]
+    : null;
+  const baku = bakuMutuLayer(key, !!pd.meta.daily);
+  // AOD memang tak bersatuan, tapi sumbu tanpa keterangan sama sekali bikin
+  // bingung. Nama besarannya sendiri yang dipakai.
+  const satuan = pd.meta.units || (key === "aod" ? "AOD" : "");
+  return {
+    par: KIMIA_HTML[key] || key,
+    badan: kepala + seriesPlotSVG(vals, pd.meta.times, satuan, pd.meta.daily, warna, pita, baku),
+  };
+}
+
+async function openPoint(lat, lon, label, isMe) {
   const key = activeLayer;
   if (!key) return;
+  const sidebar = pakaiSidebar(key);
   // Tutup popup lama LEBIH DULU. Penutupan memicu penangan popupclose yang
   // membersihkan state, jadi kalau state diisi duluan justru ikut terhapus.
   if (pointPopup) map.closePopup(pointPopup);
+  if (!sidebar) tutupSidebar();
   popupLabel = label || null;
-  sharedPoint = { lat, lon, name: label || null };
+  sharedPoint = { lat, lon, name: label || null, me: !!isMe };
   updateHash();
   const judul = label || fmtCoord(lat, lon);
-  pointPopup = L.popup({ className: "pt-pop", maxWidth: 330, autoPan: true, closeOnClick: false })
-    .setLatLng([lat, lon])
-    .setContent(`<div class="pp-title">${judul}</div><div class="pp-body">Memuat…</div>`)
-    .openOn(map);
+  const token = ++pointToken;                 // hasil yang telat jangan menimpa titik baru
+  if (sidebar) {
+    tandaTitik(lat, lon, isMe);
+    bukaSidebar(judul, KIMIA_HTML[key] || key, !label);
+    isiSidebar('<div class="pt-loading">Memuat…</div>');
+  } else {
+    hapusTanda();
+    pointPopup = L.popup({ className: "pt-pop", maxWidth: 330, autoPan: true, closeOnClick: false })
+      .setLatLng([lat, lon])
+      .setContent(`<div class="pp-title">${judul}</div><div class="pp-body">Memuat…</div>`)
+      .openOn(map);
+  }
   try {
-    const pd = await loadSeries(key);
-    const vals = sampleSeries(pd, lat, lon);
-    let warna = (LEGENDS[key]?.cells?.[1]?.[1]) || "#35c84a";
-    let kepala = "";
-    if (key === "ispu") {
-      // ISPU perlu dua hal lagi yang tak muat di plot: kategorinya, dan parameter
-      // mana yang bikin angkanya setinggi itu. Aturannya menyebut yang kedua
-      // "pencemar kritis", dan itu justru yang menentukan tindakan.
-      const i = Math.max(0, nearestIndex(pd.meta.times, frames[current] && frames[current].valid_time));
-      const nilai = Math.round(vals[i]);
-      const [, nama, bg, putih] = ispuKategori(nilai);
-      warna = bg;
-      let kritis = "";
-      try {
-        const pk = await loadSeries("ispu_kritis");
-        const kode = sampleSeriesNearest(pk, lat, lon);
-        const par = (pd.meta.kritis_param || [])[Math.round(kode[i])];
-        if (par) kritis = `<div class="pp-kritis">Pencemar kritis <b>${KIMIA_HTML[par] || par}</b></div>`;
-      } catch (e) { console.warn("pencemar kritis tak terbaca", e); }
-      kepala = `<div class="pp-ispu${putih ? " putih" : ""}" style="background:${bg}">` +
-               `<b>${nilai}</b><span>${nama}</span></div>${kritis}`;
+    const { par, badan } = await badanTitik(key, lat, lon);
+    if (token !== pointToken) return;
+    if (sidebar) {
+      const t = $("pt-par"); if (t) t.innerHTML = par;
+      isiSidebar(badan);
+    } else if (pointPopup) {
+      pointPopup.setContent(`<div class="pp-title">${judul}<span class="pp-par">${par}</span></div>` +
+                            `<div class="pp-body">${badan}</div>`);
     }
-    const parDT = key.startsWith("dt_") ? key.slice(3) : null;
-    if (parDT) {
-      // Daya tampung: angka + kategori + pecahannya. BE max dan BE eks tak perlu
-      // disimpan sendiri, cukup volume udara per sel; BE max = V x BMUA, lalu
-      // BE eks = BE max - DT. Menghemat satu berkas deret per parameter.
-      const i = Math.max(0, nearestIndex(pd.meta.times, frames[current] && frames[current].valid_time));
-      const nilai = vals[i];
-      const bg = dtWarna(nilai);
-      // Kalimatnya dari aturannya sendiri: positif berarti beban maksimum BELUM
-      // terlampaui, negatif berarti SUDAH. Tak ada penggolongan lain di sana.
-      const nama = nilai < 0 ? "Beban maksimum terlampaui" : "Masih ada daya tampung";
-      const putih = DT_PUTIH[dtIndeks(nilai)];
-      warna = bg;
-      let rinci = "";
-      try {
-        const pv = await loadSeries("dt_vol");
-        const vol = sampleSeries(pv, lat, lon)[i];          // km3
-        if (isFinite(vol) && vol > 0) {
-          const bmua = BAKU_MUTU[parDT]["24 jam"];
-          const beMaxHari = (vol * 1e9) * bmua / 1e12;      // ton/hari
-          const beEksHari = beMaxHari - nilai / 365;
-          const r0 = (v) => Math.round(v).toLocaleString("id-ID");
-          rinci = `<div class="pp-rinci">` +
-            `<div><span>Volume udara</span><b>${r0(vol)} km³</b></div>` +
-            `<div><span>BE maksimum</span><b>${r0(beMaxHari * 365)} ton/th</b></div>` +
-            `<div><span>BE eksisting</span><b>${r0(beEksHari * 365)} ton/th</b></div>` +
-            `<div><span>BMUA 24 jam</span><b>${bmua} µg/m³</b></div></div>`;
-        }
-      } catch (e) { console.warn("volume udara tak terbaca", e); }
-      kepala = `<div class="pp-ispu${putih ? " putih" : ""}" style="background:${bg}">` +
-               `<b>${Math.round(nilai).toLocaleString("id-ID")}</b><span>${nama}</span></div>` +
-               `<div class="pp-kritis">ton/tahun, Permen LH No. 5</div>${rinci}`;
-    }
-    const pita = key === "ispu" ? ISPU_KAT.map(([batas, , col]) => [batas, col])
-      // Dua pita saja, dipisah di NOL. Itu satu-satunya batas yang punya dasar.
-      : parDT ? [[0, "#ff4c4c"], [Infinity, "#4cff4c"]]
-      : null;
-    const baku = bakuMutuLayer(key, !!pd.meta.daily);
-    // AOD memang tak bersatuan, tapi sumbu tanpa keterangan sama sekali bikin
-    // bingung. Nama besarannya sendiri yang dipakai.
-    const satuan = pd.meta.units || (key === "aod" ? "AOD" : "");
-    const isi = `<div class="pp-title">${judul}<span class="pp-par">${KIMIA_HTML[key] || key}</span></div>` +
-      `<div class="pp-body">${kepala}` +
-      `${seriesPlotSVG(vals, pd.meta.times, satuan, pd.meta.daily, warna, pita, baku)}</div>`;
-    if (pointPopup) pointPopup.setContent(isi);
   } catch (e) {
     console.error(e);
-    if (pointPopup) pointPopup.setContent(`<div class="pp-title">${judul}</div><div class="pp-body">Data titik gagal dimuat.</div>`);
+    if (token !== pointToken) return;
+    if (sidebar) isiSidebar('<div class="pt-loading">Data titik gagal dimuat.</div>');
+    else if (pointPopup) pointPopup.setContent(`<div class="pp-title">${judul}</div><div class="pp-body">Data titik gagal dimuat.</div>`);
   }
 }
 
 function closePoint() {
   if (pointPopup) { map.closePopup(pointPopup); pointPopup = null; }
+  tutupSidebar();
+  hapusTanda();
+  pointToken++;
+  sidebarTersembunyi = false;
   sharedPoint = null;
   popupLabel = null;
   updateHash();
@@ -1400,8 +1490,23 @@ map.on("popupclose", (e) => {
   popupLabel = null;
   updateHash();
 });
-function hidePoint() { closePoint(); }
-function reopenPoint() {}
+
+// Sembunyikan = panel digeser ke kanan, titiknya TETAP terpilih dan penanda di
+// peta tetap ada. Tombol tab di tepi kanan yang memanggilnya kembali.
+function hidePoint() {
+  if (!sidebarAktif()) { closePoint(); return; }
+  sidebarTersembunyi = true;
+  $("point-panel")?.classList.add("hidden");
+  $("pt-reopen")?.classList.add("show");
+  geserUI();
+}
+
+function reopenPoint() {
+  sidebarTersembunyi = false;
+  $("point-panel")?.classList.remove("hidden");
+  $("pt-reopen")?.classList.remove("show");
+  geserUI();
+}
 
 // ================= FRESHNESS · SHARE · TOAST =================
 // Waktu inisiasi model (run_time GFS) dalam WIB — jam & tanggal. Kredibilitas:

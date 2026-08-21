@@ -202,8 +202,11 @@ _AOD_SCALE = _skala(0.05, [0.2, 0.5, 1.0, 2.0, 3.0], _PALET["aod"])
 # mengkhawatirkan justru nilai RENDAH, karena lapisan aduk yang tipis mengurung
 # emisi di dekat tanah. Jadi yang menyala warna panas adalah yang rendah, dan yang
 # tinggi dibiarkan bening karena berarti udaranya lega dan tak perlu ditandai.
-_PBL_WARNA = [(0xd7, 0x19, 0x1c), (0xf4, 0x6d, 0x43), (0xfd, 0xae, 0x61),
-              (0xfe, 0xe0, 0x8b), (0xff, 0xff, 0xbf)]
+# magma dibalik, diambil di posisi 1,00 turun ke 0,20. Ujung terangnya dipakai
+# untuk nilai RENDAH supaya yang mengkhawatirkan menyala di atas alas gelap, lalu
+# meredup ke ungu tua dan akhirnya bening di lapisan yang sudah lega.
+_PBL_WARNA = [(0xfc, 0xfd, 0xbf), (0xfe, 0x9f, 0x6d), (0xde, 0x49, 0x68),
+              (0x8c, 0x29, 0x81), (0x3b, 0x0f, 0x70)]
 _PBL_ALPHA = [235, 205, 170, 130, 70]
 _PBL_AMBANG = [200, 400, 700, 1000, 1500]   # meter
 
