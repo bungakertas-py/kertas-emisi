@@ -171,7 +171,7 @@
                Tombolnya sengaja memakai kelas .layer-btn juga, jadi seluruh
                mesin pemilih layer yang sudah ada langsung berlaku. -->
           <div class="panel daya-dukung">
-            <div class="label-caps">DAYA DUKUNG</div>
+            <div class="label-caps">DAYA TAMPUNG</div>
             <div class="dd-row">
               <button class="layer-btn dd-btn" data-layer="dt_pm25" data-tip="Daya tampung PM2,5">PM<sub>2.5</sub></button>
               <button class="layer-btn dd-btn" data-layer="dt_pm10" data-tip="Daya tampung PM10">PM<sub>10</sub></button>
@@ -280,6 +280,26 @@
     </div>
 
     <!-- Toast kecil (mis. "Link disalin") -->
+    <!-- ============ TATA LETAK HP ============
+         Semua kontrol dirangkum ke satu bilah bawah yang disembunyikan di luar
+         bingkai. Isinya DIBANGUN di app.js dari tombol yang sudah ada, dan
+         kliknya diteruskan ke tombol aslinya. Satu sumber kebenaran, jadi tak
+         ada dua tempat yang harus disamakan tiap ada parameter baru.
+         Di desktop seluruh blok ini disembunyikan CSS. -->
+    <button id="lowbar-handle" class="lowbar-handle" aria-label="Buka panel kontrol">
+      <span class="material-symbols-outlined">keyboard_arrow_up</span>
+    </button>
+    <div id="lowbar" class="lowbar" aria-hidden="true">
+      <div class="lowbar-grip"></div>
+      <div id="lowbar-body" class="lowbar-body"></div>
+    </div>
+    <div id="par-chip" class="par-chip" hidden></div>
+    <div id="ket-stack" class="ket-stack" hidden>
+      <div id="ket-body" class="ket-body"></div>
+      <button id="ket-toggle" class="ket-toggle" aria-label="Sembunyikan keterangan">
+        <span class="material-symbols-outlined">chevron_left</span>
+      </button>
+    </div>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
     <!-- Kartu Tentang -->

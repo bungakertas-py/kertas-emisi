@@ -1104,3 +1104,224 @@ sub { font-size: .72em; line-height: 0; vertical-align: baseline; position: rela
   font-family: var(--font-mono); font-size: 9.5px; color: var(--variant); }
 .pp-bmua svg { flex: none; overflow: visible; }
 .pp-dot { fill: #e8590c; }
+
+/* ==================================================================
+   TATA LETAK HP (<=640px)
+   Semua kontrol pindah ke satu bilah bawah yang tersembunyi di luar
+   bingkai. Peta jadi bersih: cuma chip nama parameter di atas, legenda
+   tegak di kiri, dan tumpukan keterangan di kiri bawah.
+   Di desktop SELURUH blok ini tidak berlaku.
+   ================================================================== */
+
+/* Default: semua elemen HP disembunyikan, supaya desktop tak tersentuh. */
+.lowbar, .lowbar-handle, .par-chip, .ket-stack { display: none; }
+
+@media (max-width: 640px) {
+
+  /* ---- gagang penarik, satu-satunya kontrol yang terlihat saat ciut ---- */
+  .lowbar-handle {
+    display: flex; align-items: center; justify-content: center;
+    position: fixed; left: 50%; bottom: 0; transform: translateX(-50%);
+    z-index: 1400; width: 76px; height: 30px; padding: 0;
+    background: var(--surface); color: var(--ink);
+    border: var(--bw) solid var(--ink); border-bottom: none;
+    box-shadow: 0 -3px 0 0 var(--ink); cursor: pointer;
+  }
+  .lowbar-handle .material-symbols-outlined { font-size: 22px; }
+  .lowbar-handle.open { opacity: 0; pointer-events: none; }
+
+  /* ---- bilah bawah ---- */
+  .lowbar {
+    display: block; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1390;
+    max-height: 62vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    /* Saat terbuka, bilah MENGISI tepat ruang sisa di bawah peta 4:3. Kalau
+       cuma dipatok di bawah, isinya yang pendek menyisakan celah hitam. */
+    padding: 10px 12px 16px;
+    background: var(--surface); border-top: var(--bw) solid var(--ink);
+    /* Ciut = digeser penuh ke bawah luar bingkai. Muncul dengan naik + memudar. */
+    transform: translateY(100%); opacity: 0; pointer-events: none;
+    transition: transform .26s ease, opacity .2s ease;
+  }
+  .lowbar.open {
+    transform: translateY(0); opacity: 1; pointer-events: auto;
+    /* Tinggi DIPATOK, bukan diregangkan top+bottom, sama alasannya dengan
+       legenda: peregangan tak berlaku dan menyisakan celah hitam di atas. */
+    top: 75vw; bottom: auto; height: calc(100dvh - 75vw); max-height: none;
+  }
+  .lowbar-grip {
+    width: 44px; height: 4px; margin: 0 auto 10px;
+    background: var(--ink); opacity: .35;
+  }
+
+  .lb-sec + .lb-sec { margin-top: 14px; }
+  .lb-head {
+    font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+    letter-spacing: .12em; color: var(--variant); margin-bottom: 4px;
+  }
+  /* Garis pemisah tipis di bawah judul seksi, meniru contoh user. */
+  .lb-rule { height: 2px; background: var(--ink); opacity: .18; margin-bottom: 8px; }
+  /* TIGA per baris, sisanya turun ke bawah. Parameter ada 9 jadi pas 3 baris,
+     dan Penanda maupun Fenomena yang isinya 3 jadi satu baris penuh. */
+  /* minmax(0,1fr), BUKAN 1fr. Kolom 1fr punya min-width:auto sehingga tak mau
+     menyusut di bawah lebar teksnya, dan label panjang seperti "Daya tampung
+     PM2,5" membuat seluruh grid meluber keluar layar. */
+  .lb-items { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .lb-btn {
+    display: flex; align-items: center; justify-content: flex-start; gap: 5px;
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    padding: 7px 8px; font-family: var(--font-ui); font-size: 11px; font-weight: 700;
+    color: var(--ink); background: var(--surface-high);
+    border: 2px solid var(--ink); box-shadow: 2px 2px 0 0 var(--ink); cursor: pointer;
+  }
+  .lb-btn .material-symbols-outlined { font-size: 15px; flex: 0 0 auto; }
+  .lb-btn.active { background: var(--lime); color: var(--on-lime); }
+  .lb-btn.disabled { opacity: .38; pointer-events: none; box-shadow: none; }
+  .lb-btn:active { transform: translate(2px, 2px); box-shadow: none; }
+
+  /* ---- peta didorong & dijadikan 4:3 landscape saat bilah naik ---- */
+  #stage.lowbar-open #map {
+    height: 75vw;               /* lebar : tinggi = 4 : 3 */
+    transition: height .26s ease;
+  }
+  /* Bilah terbuka: legenda mengecil dan tingginya menyesuaikan peta 4:3. */
+  #stage.lowbar-open .legend-panel {
+    top: 104px; bottom: auto; height: calc(75vw - 112px); max-height: none;
+  }
+  #stage.lowbar-open .acc-badge { bottom: auto; top: calc(75vw - 30px); }
+  /* Chip parameter & tumpukan keterangan juga menempel ke area peta. */
+  #stage.lowbar-open .ket-stack { bottom: auto; top: calc(75vw - 92px); }
+  /* Slider disembunyikan selama bilah terbuka. Tak ada ruang, dan kalau
+     dibiarkan ia tembus menimpa tombol. Muncul lagi begitu bilah ditutup.
+     Yang disembunyikan HANYA .timeline, bukan .ui-bottom, karena legenda
+     ternyata anak .ui-bottom juga dan ikut hilang kalau induknya dimatikan. */
+  #stage.lowbar-open .timeline { opacity: 0; pointer-events: none; }
+  .timeline { transition: opacity .2s ease; }
+  #stage #map { transition: height .26s ease; }
+
+  /* ---- kontrol lama disembunyikan, sudah diwakili bilah bawah ---- */
+  .layer-bar, .level-bar, .panel.selects,
+  #ctrl-toggle, .lang, .zoom, .city-wrap, #cyclone-toggle, #itcz-toggle,
+  .phenom-wrap, #share-btn, #fs-btn, .search-wrap,
+  /* Kontainer khas dua app lain: Daya Dukung (Emisi) dan Indeks Iklim
+     (Fenomena). Isinya sudah pindah jadi seksi di bilah bawah. */
+  .panel.daya-dukung, .index-bar, .index-menu, #zones-btn,
+  #model-toggle, #depth-toggle { display: none !important; }
+  /* Lokasi TETAP di panel kanan, permintaan user. */
+  #geo-btn { display: flex !important; }
+
+  /* ---- chip parameter: TEPAT DI ATAS legenda tegak, bukan tengah layar ---- */
+  .par-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    position: fixed; left: 8px; top: 68px; transform: none;
+    z-index: 1200; padding: 6px 10px; white-space: nowrap; max-width: 60vw;
+    overflow: hidden; text-overflow: ellipsis;
+    background: var(--surface); color: var(--ink);
+    border: var(--bw) solid var(--ink); box-shadow: 3px 3px 0 0 var(--ink);
+    font-family: var(--font-display); font-size: 12px;
+  }
+  .par-chip[hidden] { display: none; }
+  .par-chip .material-symbols-outlined { font-size: 16px; }
+
+  /* ---- legenda TEGAK di kiri, TINGGI ----
+     Layar HP itu potret, jadi ruang tegaknya banyak. Legenda direntang dari
+     bawah chip parameter sampai tepat di atas badge akurasi, dan tiap selnya
+     MELAR mengisi sisa ruang, bukan dipatok tinggi tetap. Kalau dipatok, di
+     layar tinggi ia jadi bantat menggantung di tengah. */
+  .legend-panel {
+    /* Tinggi DIPATOK, bukan diregangkan lewat top + bottom. Peregangan itu
+       tak berlaku di sini karena panel ini flex-container yang tingginya
+       terlanjur ditentukan isinya, hasilnya jadi bantat menggantung.
+       dvh dipakai supaya ikut menyusut saat bilah alamat HP muncul. */
+    position: fixed; left: 8px; top: 108px; bottom: auto;
+    /* 108 di atas untuk chip, 156 di bawah untuk badge akurasi + slider. */
+    height: calc(100dvh - 264px);
+    z-index: 1150; width: auto; max-width: 72px;
+    display: flex; flex-direction: column-reverse;   /* sel pertama = paling bawah */
+    overflow: hidden; padding: 0;
+  }
+  .legend-panel .legend {
+    display: flex; flex-direction: column-reverse;
+    flex: 1 1 auto; min-height: 0; overflow: hidden;
+  }
+  .legend-panel .legend-cell {
+    width: 100%; min-width: 44px; min-height: 18px; height: auto;
+    flex: 1 1 0;                 /* melar rata mengisi tinggi yang tersedia */
+    border-right: none; border-bottom: 1px solid rgba(28,27,27,.2);
+    font-size: 11px;
+    /* Label kata seperti "Sangat Tidak Sehat" harus MEMBUNGKUS, bukan
+       terpotong. Dengan lebar sel yang sempit ia jatuh sendiri jadi tiga
+       baris, dan "Tidak Sehat" jadi dua baris. Rata tengah supaya rapi. */
+    white-space: normal; text-align: center; line-height: 1.15;
+    padding: 2px 3px; overflow-wrap: normal; word-break: keep-all; hyphens: none;
+  }
+  /* Legenda berlabel KATA (ISPU) sedikit lebih lebar, supaya "Berbahaya"
+     muat utuh satu baris. Pemenggalan barisnya sendiri sudah diatur <br>
+     di LEGENDS.ispu, bukan mengandalkan pembungkusan otomatis. */
+  .legend-panel .legend-words .legend-cell { font-size: 10px; letter-spacing: -.01em; }
+  .legend-panel .legend-cell:last-child { border-bottom: none; }
+  .legend-head {
+    order: 99;                    /* dengan column-reverse, ini jatuh ke BAWAH */
+    flex: 0 0 auto;
+    padding: 5px 6px; text-align: center; font-size: 9px;
+    border-right: none; border-top: var(--bw) solid var(--ink);
+  }
+
+  /* ---- badge akurasi: DI ATAS slider, bukan menempel di dalamnya ---- */
+  /* Slider setinggi ~70px, jadi 120 dari bawah menaruh badge tepat DI ATASNYA
+     dengan sedikit jarak, bukan menempel di dalamnya seperti di desktop. */
+  .acc-badge {
+    position: fixed; left: 8px; right: auto; bottom: 120px; top: auto;
+    z-index: 1160;
+  }
+
+  /* ---- tumpukan keterangan, kiri bawah, bisa diciutkan ke samping ---- */
+  .ket-stack {
+    display: flex; align-items: flex-end;
+    position: fixed; left: 0; bottom: 42px; z-index: 1250;
+    max-width: 78vw;
+    transition: transform .24s ease;
+  }
+  .ket-stack[hidden] { display: none; }
+  .ket-stack.ciut { transform: translateX(calc(-100% + 26px)); }
+  .ket-body {
+    max-height: 40vh; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 8px; background: var(--surface);
+    border: var(--bw) solid var(--ink); border-left: none;
+    box-shadow: 3px 3px 0 0 var(--ink);
+  }
+  .ket-toggle {
+    flex: 0 0 auto; width: 26px; height: 46px; padding: 0; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--lime); color: var(--on-lime);
+    border: var(--bw) solid var(--ink); border-left: none;
+    box-shadow: 3px 3px 0 0 var(--ink);
+  }
+  .ket-toggle .material-symbols-outlined { font-size: 20px; transition: transform .2s ease; }
+  .ket-stack.ciut .ket-toggle .material-symbols-outlined { transform: rotate(180deg); }
+  .ket-item { font-family: var(--font-ui); font-size: 11px; line-height: 1.35; }
+  .ket-item b { font-family: var(--font-display); font-size: 11px; }
+  .ket-judul {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: .1em;
+    color: var(--variant); margin-bottom: 2px;
+  }
+
+  /* Slider tetap di bawah tapi diberi ruang untuk gagang bilah. */
+  .ui-bottom { padding-bottom: 34px; }
+  /* Legenda lama di baris bawah tak dipakai lagi, sudah pindah ke kiri tegak. */
+  .legend-col { display: block; }
+}
+
+@media (max-width: 640px) {
+  /* Elemen keterangan yang DIPINDAH ke tumpukan kiri bawah: posisi absolut
+     bawaannya dimatikan supaya ikut mengalir di dalam tumpukan. */
+  .di-ket {
+    position: static !important; inset: auto !important;
+    transform: none !important; margin: 0 !important;
+    max-width: 100% !important; width: auto !important;
+    box-shadow: none !important; border: none !important;
+    background: transparent !important; padding: 0 !important;
+    display: block !important; opacity: 1 !important;
+  }
+  .di-ket .cyc-tab, .di-ket .itcz-tab { display: none !important; }
+}

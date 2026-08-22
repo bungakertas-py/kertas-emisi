@@ -46,8 +46,14 @@ const ISPU_RENTANG = ["1-50", "51-100", "101-200", "201-300", "\u2265301"];
 const LEGENDS = {
   // Sel ISPU DUA BARIS: nama kategori di atas, rentang angkanya di bawah. Orang awam
   // membaca kategorinya, orang yang terbiasa dengan ISPU mencari bilangannya.
+  // Nama kategori dipenggal EKSPLISIT per kata untuk legenda. Mengandalkan
+  // pembungkusan otomatis tak bisa: "Berbahaya" satu kata sembilan huruf,
+  // sedangkan "Tidak Sehat" cuma sedikit lebih panjang. Lebar berapa pun yang
+  // memaksa "Tidak Sehat" turun dua baris pasti ikut memotong "Berbahaya" di
+  // tengah kata. Dengan <br> sendiri, tiap label jatuh persis sebanyak katanya.
   ispu: { head: "ISPU", words: 1,
-          cells: ISPU_KAT.map(([, nama, warna, putih], i) => [nama, warna, putih, ISPU_RENTANG[i]]) },
+          cells: ISPU_KAT.map(([, nama, warna, putih], i) =>
+            [nama.replace(/ /g, "<br>"), warna, putih, ISPU_RENTANG[i]]) },
   pm25: _leg("pm25", UG, [15, 55, 150, 250, 400]),
   pm10: _leg("pm10", UG, [50, 150, 350, 420, 600]),
   co:   _leg("co", UG, [500, 1000, 2000, 4000, 8000]),
@@ -2555,3 +2561,173 @@ if ("serviceWorker" in navigator) {
   window.addEventListener("load", () =>
     navigator.serviceWorker.register("sw.js").catch((e) => console.warn("SW gagal:", e)));
 }
+
+// Seksi bilah bawah HP. `sel` = pemilih tombol ASLI yang diwakili.
+const LB_SEKSI = [
+  // dd-btn dikeluarkan dari Parameter, ia punya seksinya sendiri di bawah.
+  { judul: "Parameter", sel: ".layer-btn[data-layer]:not(.dd-btn)" },
+  { judul: "Daya Tampung", sel: ".layer-btn.dd-btn" },
+];
+// Warisan Kertas Cuaca (siklon, ITCZ, monsun, kondisi kota) memang tak berlaku
+// di Kertas Emisi dan sudah disembunyikan CSS, jadi tak diikutkan.
+const KET_SUMBER = [];
+
+/* ==================================================================
+   TATA LETAK HP: bilah bawah, chip parameter, tumpukan keterangan.
+
+   Versi UMUM, dipakai bersama Kertas Cuaca, Kertas Fenomena, dan Kertas
+   Emisi. Yang beda antar aplikasi cuma daftar seksi di LB_SEKSI dan daftar
+   kotak keterangan di KET_SUMBER, keduanya di atas.
+
+   Prinsip yang dipegang: bilah bawah TIDAK punya tombol sendiri. Isinya
+   dibangun dari tombol yang SUDAH ADA di DOM, dan kliknya diteruskan ke
+   tombol aslinya. Jadi tak ada dua tempat yang harus disamakan tiap kali
+   ada parameter baru, dan status aktif/redup selalu ikut yang asli.
+   Penyelarasannya pakai MutationObserver, bukan memanggil ulang dari
+   belasan tempat, supaya tak ada jalur yang kelewat.
+   ================================================================== */
+const HP = () => window.matchMedia("(max-width: 640px)").matches;
+const _q = (id) => document.getElementById(id);
+
+function _ikonDari(btn) {
+  const i = btn.querySelector(".material-symbols-outlined");
+  return i ? i.textContent.trim() : "";
+}
+function _labelDari(btn) {
+  // Urutan: .lb-txt, lalu TEKS TOMBOL ITU SENDIRI, baru data-tip.
+  // data-tip sering berisi keterangan panjang ("Daya tampung PM2,5",
+  // "Convective Available Potential Energy") yang tak muat di tombol selebar
+  // sepertiga layar. Teks tombolnya sendiri sudah ringkas ("PM2.5", "CAPE").
+  // Ikon dikeluarkan dulu, kalau tidak nama ligature Material ikut terbaca.
+  const t = btn.querySelector(".lb-txt")?.textContent.trim();
+  if (t) return t;
+  const salin = btn.cloneNode(true);
+  salin.querySelectorAll(".material-symbols-outlined").forEach((e) => e.remove());
+  const teks = salin.textContent.replace(/\s+/g, " ").trim();
+  if (teks) return teks;
+  return btn.dataset.tip || btn.getAttribute("aria-label") || "";
+}
+
+function bangunLowbar() {
+  const body = _q("lowbar-body");
+  if (!body) return;
+  body.innerHTML = "";
+  for (const sec of LB_SEKSI) {
+    const asli = [...document.querySelectorAll(sec.sel)];
+    if (!asli.length) continue;
+    const tiruan = asli.map((src) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      const ik = _ikonDari(src);
+      b.innerHTML = (ik ? `<span class="material-symbols-outlined">${ik}</span>` : "")
+                  + _labelDari(src);
+      b.addEventListener("click", () => {
+        if (src.classList.contains("disabled")) return;
+        src.click();
+        if (sec.tutup) setLowbar(false);   // seksi yang sekali pilih langsung tutup
+      });
+      return b;
+    });
+    // Status awal + ikut berubah otomatis kalau kelas tombol asli berubah.
+    asli.forEach((src, i) => {
+      const cermin = () => {
+        tiruan[i].className = "lb-btn"
+          + (src.classList.contains("active") ? " active" : "")
+          + (src.classList.contains("disabled") ? " disabled" : "");
+      };
+      cermin();
+      new MutationObserver(cermin).observe(src, { attributes: true, attributeFilter: ["class"] });
+    });
+    const wrap = document.createElement("div");
+    wrap.className = "lb-sec";
+    wrap.innerHTML = `<div class="lb-head">${sec.judul}</div><div class="lb-rule"></div>`;
+    const box = document.createElement("div");
+    box.className = "lb-items";
+    tiruan.forEach((b) => box.appendChild(b));
+    wrap.appendChild(box);
+    body.appendChild(wrap);
+  }
+}
+
+function setLowbar(buka) {
+  const lb = _q("lowbar"), h = _q("lowbar-handle"), st = _q("stage");
+  if (!lb || !h) return;
+  lb.classList.toggle("open", buka);
+  h.classList.toggle("open", buka);
+  lb.setAttribute("aria-hidden", String(!buka));
+  st && st.classList.toggle("lowbar-open", buka);
+  // Peta berubah tinggi (jadi 4:3), Leaflet harus diberi tahu.
+  setTimeout(() => { try { map.invalidateSize({ animate: false }); } catch (e) {} }, 300);
+}
+
+// Chip nama parameter aktif di tengah atas.
+function updateParChip() {
+  const el = _q("par-chip");
+  if (!el) return;
+  if (!HP()) { el.hidden = true; return; }
+  const src = document.querySelector(".layer-btn.active");
+  if (!src) { el.hidden = true; return; }
+  el.hidden = false;
+  const ik = _ikonDari(src);
+  el.innerHTML = (ik ? `<span class="material-symbols-outlined">${ik}</span>` : "")
+               + _labelDari(src);
+}
+
+// Keterangan dikumpulkan ke kiri bawah. Elemen ASLINYA yang dipindah, bukan
+// disalin, supaya isinya tetap ikut diperbarui oleh kode yang sudah ada.
+const _ketAsal = new Map();
+function susunKeterangan() {
+  const stack = _q("ket-stack"), body = _q("ket-body");
+  if (!stack || !body) return;
+  if (!HP()) {                       // desktop: kembalikan ke tempat semula
+    for (const [id] of KET_SUMBER) {
+      const el = _q(id), asal = _ketAsal.get(id);
+      if (el && asal && el.parentElement === body) { el.classList.remove("di-ket"); asal.appendChild(el); }
+    }
+    stack.hidden = true;
+    return;
+  }
+  let ada = 0;
+  for (const [id, judul] of KET_SUMBER) {
+    const el = _q(id);
+    if (!el) continue;
+    if (!_ketAsal.has(id)) _ketAsal.set(id, el.parentElement);
+    const tampil = el.classList.contains("show") || el.classList.contains("open")
+                || (el.parentElement !== body && getComputedStyle(el).display !== "none");
+    if (tampil) {
+      if (el.parentElement !== body) {
+        el.classList.add("di-ket");
+        const t = document.createElement("div");
+        t.className = "ket-judul"; t.textContent = judul.toUpperCase();
+        body.appendChild(t); body.appendChild(el);
+      }
+      ada++;
+    } else if (el.parentElement === body) {
+      el.classList.remove("di-ket");
+      if (el.previousElementSibling?.classList.contains("ket-judul")) el.previousElementSibling.remove();
+      _ketAsal.get(id)?.appendChild(el);
+    }
+  }
+  stack.hidden = ada === 0;
+}
+
+function setupHP() {
+  bangunLowbar();
+  updateParChip();
+  _q("lowbar-handle")?.addEventListener("click", () => setLowbar(true));
+  _q("lowbar")?.addEventListener("click", (e) => {
+    if (e.target === _q("lowbar") || e.target.classList.contains("lowbar-grip")) setLowbar(false);
+  });
+  _q("ket-toggle")?.addEventListener("click", () => _q("ket-stack").classList.toggle("ciut"));
+  window.addEventListener("resize", () => { updateParChip(); susunKeterangan(); });
+  // Parameter aktif & keterangan bisa berubah dari mana saja; pantau saja.
+  new MutationObserver(() => { updateParChip(); susunKeterangan(); })
+    .observe(document.body, { attributes: true, subtree: true, attributeFilter: ["class", "style"] });
+  susunKeterangan();
+}
+
+// Pemicu. Bilah dibangun begitu DOM siap; status aktif/redup yang berubah
+// belakangan (saat katalog dimuat) sudah ditangani MutationObserver.
+if (document.readyState === "loading")
+  document.addEventListener("DOMContentLoaded", setupHP);
+else setupHP();
