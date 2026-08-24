@@ -119,6 +119,35 @@
             </button>
           </div>
 
+          <!-- Banner PERINGATAN: kota yang diramalkan tembus Tidak Sehat (ISPU>100)
+               dalam 5 hari ke depan. Diisi & ditampilkan oleh app.js dari peringatan.json. -->
+          <div id="peringatan-note" class="cyc-note peringatan-note">
+            <div class="cyc-note-top">
+              <span class="material-symbols-outlined">warning</span>
+              <span class="cyc-note-txt" id="peringatan-ringkas">Peringatan kualitas udara</span>
+            </div>
+            <div class="cyc-detail" id="peringatan-detail"></div>
+            <button type="button" class="cyc-tab" id="peringatan-toggle" aria-label="Tampilkan daftar kota">
+              <span class="material-symbols-outlined cyc-caret">expand_more</span>
+            </button>
+          </div>
+
+          <!-- Banner TITIK API: hotspot VIIRS 48 jam terakhir (pengamatan satelit).
+               Muncul saat toggle Titik Api aktif. Diisi app.js dari titik_api.json. -->
+          <div id="api-note" class="cyc-note api-note">
+            <div class="cyc-note-top">
+              <span class="material-symbols-outlined">local_fire_department</span>
+              <span class="cyc-note-txt" id="api-ringkas">Titik panas VIIRS</span>
+            </div>
+            <div class="cyc-detail">
+              <div class="api-lead">Titik api KUAT (FRP di atas 100 MW) dari satelit VIIRS, disaring dari jendela 48 jam terakhir. Ini PENGAMATAN (telat sekitar 3 jam), bukan ramalan, dan bisa terlewat bila tertutup awan. Klik titik untuk detail, dan geser slider di atas legenda untuk mempersempit jendela waktu.</div>
+              <div class="cyc-row"><span class="api-sw" style="background:#a80000"></span><b>Titik api</b><span class="cyc-th">FRP &ge; 100 MW</span></div>
+            </div>
+            <button type="button" class="cyc-tab" id="api-note-toggle" aria-label="Tampilkan keterangan titik api">
+              <span class="material-symbols-outlined cyc-caret">expand_more</span>
+            </button>
+          </div>
+
           </div>
 
           <div class="layer-bar">
@@ -234,6 +263,7 @@
           </div>
           <button id="cyclone-toggle" class="icon-btn" aria-label="Deteksi siklon + jalur prakiraan" data-tip="Siklon"><span class="material-symbols-outlined">cyclone</span></button>
           <button id="itcz-toggle" class="icon-btn" aria-label="Zona pertemuan angin (ITCZ)" data-tip="ITCZ"><span class="material-symbols-outlined">looks</span></button>
+          <button id="api-toggle" class="icon-btn" aria-label="Titik panas satelit VIIRS (FIRMS)" data-tip="Titik Api"><span class="material-symbols-outlined">local_fire_department</span></button>
           <div class="phenom-wrap">
             <button id="mon-toggle" class="icon-btn" aria-label="Fenomena atmosfer" data-tip="Fenomena"><span class="material-symbols-outlined">explore</span></button>
             <div id="phenom-panel" class="phenom-panel"></div>
@@ -271,6 +301,16 @@
 
         <!-- legenda — bawah kanan (legenda ikon kondisi di atas, muncul saat toggle) -->
         <div class="legend-col">
+          <!-- Slider KHUSUS titik api: menyaring hotspot menurut jendela waktu
+               deteksi (jam ke belakang). Kontainer sendiri, DI ATAS legenda bar,
+               tipis & horizontal. Muncul hanya saat toggle Titik Api aktif. -->
+          <div id="fire-slider-box" class="fire-slider-box" hidden>
+            <div class="fsb-top">
+              <span class="material-symbols-outlined fsb-ico">local_fire_department</span>
+              <span class="fsb-label" id="fire-slider-label">48 jam terakhir</span>
+            </div>
+            <input id="fire-slider" class="fire-slider" type="range" min="1" max="48" value="48" step="1" aria-label="Jendela waktu titik api (jam ke belakang)">
+          </div>
           <div class="legend-panel">
             <div class="legend-head mono" id="legend-head">KNOTS</div>
             <div class="legend" id="legend-cells"></div>
@@ -301,6 +341,22 @@
       </button>
     </div>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <!-- Gerbang sandi layer Daya Tampung -->
+    <div id="pw-overlay" class="about-overlay">
+      <div class="pw-card">
+        <span class="about-tag">TERKUNCI</span>
+        <h2 class="pw-title">Layer Daya Tampung</h2>
+        <p class="pw-note">Masukkan sandi untuk menampilkan layer ini.</p>
+        <input id="pw-input" class="pw-input" type="password" autocomplete="off"
+               spellcheck="false" placeholder="Sandi" aria-label="Sandi layer daya tampung" />
+        <div id="pw-err" class="pw-err" hidden>Sandi salah.</div>
+        <div class="pw-act">
+          <button id="pw-cancel" type="button" class="pw-btn">Batal</button>
+          <button id="pw-ok" type="button" class="pw-btn pw-btn-primary">Buka</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Kartu Tentang -->
     <div id="about-overlay" class="about-overlay">

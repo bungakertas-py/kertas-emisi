@@ -295,7 +295,10 @@ html, body {
 .city-cond.no-ico .cc-lbl { top: 6px; pointer-events: auto; cursor: pointer; }
 
 /* ===================== BOTTOM: slider (kiri) + legenda (kanan) ===================== */
-.ui-bottom { display: flex; flex-direction: row; align-items: stretch; gap: 14px; }
+/* align-items: flex-end (bukan stretch) supaya slider waktu utama TETAP tinggi
+   aslinya. Dengan stretch, ia ikut memanjang menyamai kolom legenda yang jadi
+   lebih tinggi sejak slider titik api ditambahkan di atas legend bar. */
+.ui-bottom { display: flex; flex-direction: row; align-items: flex-end; gap: 14px; }
 
 /* kolom kanan: legenda ikon kondisi (atas, saat toggle) + legend bar (bawah) */
 /* Legend bar tetap di tempat (align-self flex-end). Legenda KONDISI MENGAMBANG
@@ -682,6 +685,67 @@ html, body {
 .itcz-sw-line { height: 0; border: none; border-top: 3px dashed #ff2ea6; }
 .itcz-sw-band { background: rgba(255,46,166,.28); }
 
+/* Banner PERINGATAN kualitas udara: kota yang diramalkan tembus Tidak Sehat
+   (ISPU > 100). Aksen oranye, dibedakan dari siklon merah & ITCZ magenta.
+   Reuse struktur .cyc-note (dropdown). Ditampilkan JS lewat class .show. */
+.peringatan-note .cyc-note-top { background: #e8590c; }
+.peringatan-note .cyc-caret { color: #e8590c; }
+
+/* Banner TITIK API (hotspot VIIRS). Aksen merah bata, beda dari peringatan oranye. */
+.api-note .cyc-note-top { background: #a80000; }
+.api-note .cyc-caret { color: #a80000; }
+.api-lead { font-family: var(--font-ui); font-size: 10px; line-height: 1.4;
+  max-width: 250px; color: var(--ink); }
+.api-sw { width: 12px; height: 12px; flex: none; border-radius: 50%; border: 1px solid var(--ink); }
+/* Popup detail satu titik panas. */
+.fire-popup .leaflet-popup-content-wrapper { background: var(--surface);
+  border: 2px solid var(--ink); box-shadow: 3px 3px 0 0 var(--ink); border-radius: 0; }
+.fire-popup .leaflet-popup-content { margin: 8px 10px; }
+.fire-popup .leaflet-popup-tip { background: var(--surface); border: 2px solid var(--ink); }
+.fire-pop { font-family: var(--font-ui); font-size: 11px; line-height: 1.5; color: var(--ink); }
+/* Mode "buka ke bawah" untuk titik dekat tepi atas: tip disembunyikan, kotak
+   melayang di bawah marker (posisi diatur offset terukur di app.js). */
+.fire-popup-below .leaflet-popup-tip-container { display: none; }
+
+/* Kontainer slider titik api: DI ATAS legenda bar (bukan di dalamnya), tipis &
+   horizontal. legend-col dijadikan kolom agar slider bertumpuk di atas panel. */
+.legend-col { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.fire-slider-box { width: 190px; box-sizing: border-box; padding: 5px 9px 7px;
+  background: var(--surface); border: 2px solid var(--ink); box-shadow: 3px 3px 0 0 var(--ink);
+  pointer-events: auto; }
+.fire-slider-box[hidden] { display: none; }
+.fsb-top { display: flex; align-items: center; gap: 5px; margin-bottom: 4px; }
+.fsb-ico { font-size: 14px; color: #a80000; }
+.fsb-label { font-family: var(--font-mono); font-size: 10px; font-weight: 700; color: var(--ink); }
+.fire-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 4px;
+  background: var(--ink); outline: none; margin: 1px 0; cursor: pointer; }
+.fire-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
+  width: 12px; height: 12px; background: #a80000; border: 2px solid var(--ink); cursor: pointer; }
+.fire-slider::-moz-range-thumb { width: 12px; height: 12px; background: #a80000;
+  border: 2px solid var(--ink); border-radius: 0; cursor: pointer; }
+.per-lead { font-family: var(--font-ui); font-size: 10px; line-height: 1.4;
+  max-width: 250px; color: var(--ink); }
+.per-list { display: flex; flex-direction: column; gap: 4px; max-height: 210px;
+  overflow-y: auto; }
+.per-row { display: flex; align-items: center; gap: 7px; cursor: pointer;
+  font-family: var(--font-ui); font-size: 11px; padding: 2px 3px; }
+.per-row:hover { background: var(--lime); }
+.per-dot { width: 12px; height: 12px; flex: none; border: 1px solid var(--ink); }
+.per-nama { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.per-nilai { flex: none; font-family: var(--font-mono); font-weight: 700; }
+.per-kapan { flex: none; font-size: 9px; color: #6b6b6b; }
+
+/* Grafik TREN harian (arsip riwayat) di dalam popup/sidebar titik. */
+.pp-tren { margin-top: 10px; border-top: 2px solid var(--ink); padding-top: 8px; }
+.pp-tren-head { font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+  text-transform: uppercase; display: flex; justify-content: space-between;
+  align-items: baseline; gap: 6px; margin-bottom: 4px; }
+.pp-tren-head span { font-family: var(--font-ui); font-size: 9px; font-weight: 400;
+  text-transform: none; color: #6b6b6b; }
+.tren-kosong { font-family: var(--font-ui); font-size: 10px; line-height: 1.4;
+  color: #6b6b6b; padding: 2px 0 4px; }
+
 /* Panel FENOMENA: popover ke kiri tombol Fenomena; daftar fenomena + status dot
    (hijau neon = sedang terjadi, merah = belum). Baris tak-aktif diredupkan.
    Arus monsun digambar leaflet-velocity. */
@@ -799,6 +863,31 @@ html, body {
 .about-tag { align-self: flex-start; font-family: var(--font-mono); font-size: 10px; font-weight: 700;
   letter-spacing: .08em; background: var(--lime); color: var(--on-lime); border: 2px solid var(--ink);
   box-shadow: 2px 2px 0 0 var(--ink); padding: 3px 8px; }
+/* Gerbang sandi layer Daya Tampung. Numpang .about-overlay sebagai latar gelap. */
+.pw-card {
+  position: relative; width: 100%; max-width: 360px; padding: 20px;
+  display: flex; flex-direction: column; gap: 10px; align-items: flex-start;
+  background: var(--surface); border: var(--bw) solid var(--ink); box-shadow: var(--shadow);
+}
+.pw-title { font-family: var(--font-display); font-size: 20px; margin: 2px 0 0; }
+.pw-note { font-family: var(--font-ui); font-size: 13px; color: var(--variant); margin: 0; }
+.pw-input {
+  width: 100%; padding: 10px 12px; font-family: var(--font-mono); font-size: 14px;
+  color: var(--ink); background: var(--surface-high);
+  border: 2px solid var(--ink); border-radius: 0; outline: none;
+}
+.pw-input:focus { box-shadow: 3px 3px 0 0 var(--ink); }
+.pw-err { font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: #e8342c; }
+.pw-err[hidden] { display: none; }
+.pw-act { display: flex; gap: 8px; align-self: stretch; justify-content: flex-end; margin-top: 4px; }
+.pw-btn {
+  padding: 8px 14px; font-family: var(--font-ui); font-size: 13px; font-weight: 700;
+  background: var(--surface); color: var(--ink);
+  border: 2px solid var(--ink); box-shadow: 3px 3px 0 0 var(--ink); cursor: pointer;
+}
+.pw-btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 0 var(--ink); }
+.pw-btn-primary { background: var(--lime); color: var(--on-lime); }
+
 .about-name { font-family: var(--font-display); font-size: 26px; letter-spacing: -.01em; line-height: 1; }
 .about-intro { font-family: var(--font-ui); font-size: 13px; line-height: 1.5; color: var(--ink); }
 .about-quote { font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: var(--ink);
