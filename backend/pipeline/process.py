@@ -165,7 +165,7 @@ _CIN_SCALE = [
 _PALET = {
     "pm25": [(0xfe, 0xe1, 0x87), (0xfe, 0xab, 0x49), (0xfc, 0x5b, 0x2e), (0xd4, 0x10, 0x20), (0x80, 0x00, 0x26)],   # YlOrRd
     "pm10": [(0xfe, 0xeb, 0xa2), (0xfe, 0xbb, 0x47), (0xf0, 0x78, 0x18), (0xb8, 0x42, 0x03), (0x66, 0x25, 0x06)],   # YlOrBr, krem ke coklat tua
-    "co":   [(0xfc, 0xd0, 0xcc), (0xf9, 0x94, 0xb1), (0xe2, 0x3e, 0x99), (0x99, 0x01, 0x7b), (0x49, 0x00, 0x6a)],   # RdPu
+    "co":   [(0xfc, 0xd0, 0xcc), (0xfa, 0xa3, 0xb6), (0xf3, 0x5f, 0x9f), (0xc7, 0x1d, 0x8c), (0x87, 0x01, 0x79), (0x49, 0x00, 0x6a)],   # RdPu (6 pita)
     "no2":  [(0xe2, 0xe2, 0xef), (0xb6, 0xb6, 0xd8), (0x86, 0x83, 0xbd), (0x61, 0x40, 0x9b), (0x3f, 0x00, 0x7d)],   # Purples
     "so2":  [(0xe5, 0xf5, 0xac), (0xa2, 0xd8, 0x8a), (0x4c, 0xb0, 0x63), (0x15, 0x79, 0x3e), (0x00, 0x45, 0x29)],   # YlGn
     "o3":   [(0xff, 0x99, 0x33), (0xe5, 0x33, 0x00), (0x99, 0x00, 0x00), (0x4c, 0x00, 0x00), (0x00, 0x00, 0x00)],   # gist_heat dibalik
@@ -177,23 +177,29 @@ _ALPHA = [90, 170, 210, 232, 246]
 
 
 def _skala(bening, ambang, palet):
-    """Bangun skala warna: transparan penuh sampai `bening`, lalu ramp di `ambang`."""
+    """Bangun skala warna: transparan penuh sampai `bening`, lalu ramp di `ambang`.
+
+    Jumlah ambang boleh bukan 5 (mis. CO 6 pita). Kepekatan (_ALPHA) diregang ke
+    jumlah pita lewat interpolasi supaya polanya tetap rendah->tinggi. Nilai di atas
+    ambang teratas MENGIKUTI warna teratas (np.interp menjepit di ujung)."""
+    n = len(ambang)
+    if n == len(_ALPHA):
+        alpha = _ALPHA
+    else:
+        xs = [j / (len(_ALPHA) - 1) for j in range(len(_ALPHA))]
+        alpha = [round(float(np.interp(i / (n - 1), xs, _ALPHA))) for i in range(n)]
     out = [(0, (0x14, 0x37, 0x8f, 0)), (bening, (*palet[0], 0))]
-    return out + [(v, (*c, a)) for v, c, a in zip(ambang, palet, _ALPHA)]
+    return out + [(v, (*c, a)) for v, c, a in zip(ambang, palet, alpha)]
 
 
-# PM2.5: ISPU 15,5 baik | 55,4 sedang | 150,4 tidak sehat | 250,4 sangat tidak sehat
-_PM25_SCALE = _skala(5, [15.5, 55.4, 150.4, 250.4, 400], _PALET["pm25"])
-# PM10: ISPU 50 | 150 | 350 | 420
-_PM10_SCALE = _skala(15, [50, 150, 350, 420, 600], _PALET["pm10"])
-# CO: latar global ~100-200 ug/m3, kota bisa ribuan
-_CO_SCALE = _skala(200, [500, 1000, 2000, 4000, 8000], _PALET["co"])
-# NO2: pedoman WHO 24 jam = 25 ug/m3
-_NO2_SCALE = _skala(2, [10, 25, 50, 100, 200], _PALET["no2"])
-# SO2: pedoman WHO 24 jam = 40 ug/m3
-_SO2_SCALE = _skala(2, [10, 40, 80, 200, 400], _PALET["so2"])
-# O3: pedoman WHO 8 jam = 100 ug/m3
-_O3_SCALE = _skala(20, [60, 100, 140, 180, 240], _PALET["o3"])
+# Ambang PILIHAN USER, warna per polutan tetap. Nilai di atas ambang teratas
+# mengikuti warna teratas.
+_PM25_SCALE = _skala(5, [15, 20, 35, 40, 55], _PALET["pm25"])
+_PM10_SCALE = _skala(5, [20, 35, 40, 60, 75], _PALET["pm10"])
+_CO_SCALE = _skala(100, [500, 1000, 2000, 4000, 8000, 10000], _PALET["co"])
+_NO2_SCALE = _skala(2, [10, 50, 100, 150, 200], _PALET["no2"])
+_SO2_SCALE = _skala(1, [5, 10, 50, 100, 150], _PALET["so2"])
+_O3_SCALE = _skala(1, [5, 10, 50, 100, 150], _PALET["o3"])
 # AOD 550 nm: tanpa satuan. 0,2 berkabut tipis, di atas 1 asap tebal
 _AOD_SCALE = _skala(0.05, [0.2, 0.5, 1.0, 2.0, 3.0], _PALET["aod"])
 

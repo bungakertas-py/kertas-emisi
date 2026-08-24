@@ -15,7 +15,7 @@ const UG = "\u00b5g/m\u00b3";
 const PALET = {
   pm25: { warna: ["#fee187", "#feab49", "#fc5b2e", "#d41020", "#800026"], putih: [0, 0, 0, 1, 1] },   // YlOrRd
   pm10: { warna: ["#feeba2", "#febb47", "#f07818", "#b84203", "#662506"], putih: [0, 0, 0, 1, 1] },   // YlOrBr, krem ke coklat tua
-  co:   { warna: ["#fcd0cc", "#f994b1", "#e23e99", "#99017b", "#49006a"], putih: [0, 0, 1, 1, 1] },   // RdPu
+  co:   { warna: ["#fcd0cc", "#faa3b6", "#f35f9f", "#c71d8c", "#870179", "#49006a"], putih: [0, 0, 1, 1, 1, 1] },   // RdPu (6 pita)
   no2:  { warna: ["#e2e2ef", "#b6b6d8", "#8683bd", "#61409b", "#3f007d"], putih: [0, 0, 0, 1, 1] },   // Purples
   so2:  { warna: ["#e5f5ac", "#a2d88a", "#4cb063", "#15793e", "#004529"], putih: [0, 0, 0, 1, 1] },   // YlGn
   o3:   { warna: ["#ff9933", "#e53300", "#990000", "#4c0000", "#000000"], putih: [0, 1, 1, 1, 1] },   // gist_heat dibalik
@@ -46,20 +46,18 @@ const ISPU_RENTANG = ["1-50", "51-100", "101-200", "201-300", "\u2265301"];
 const LEGENDS = {
   // Sel ISPU DUA BARIS: nama kategori di atas, rentang angkanya di bawah. Orang awam
   // membaca kategorinya, orang yang terbiasa dengan ISPU mencari bilangannya.
-  // Nama kategori dipenggal EKSPLISIT per kata untuk legenda. Mengandalkan
-  // pembungkusan otomatis tak bisa: "Berbahaya" satu kata sembilan huruf,
-  // sedangkan "Tidak Sehat" cuma sedikit lebih panjang. Lebar berapa pun yang
-  // memaksa "Tidak Sehat" turun dua baris pasti ikut memotong "Berbahaya" di
-  // tengah kata. Dengan <br> sendiri, tiap label jatuh persis sebanyak katanya.
+  // Nama ditulis apa adanya (satu baris). Di DESKTOP tak di-wrap: fontnya diturunkan
+  // dan blok warnanya melar ikut teks (CSS .legend-words). Di HP nama boleh wrap
+  // di spasi karena legenda tegak dan sempit.
   ispu: { head: "ISPU", words: 1,
           cells: ISPU_KAT.map(([, nama, warna, putih], i) =>
-            [nama.replace(/ /g, "<br>"), warna, putih, ISPU_RENTANG[i]]) },
-  pm25: _leg("pm25", UG, [15, 55, 150, 250, 400]),
-  pm10: _leg("pm10", UG, [50, 150, 350, 420, 600]),
-  co:   _leg("co", UG, [500, 1000, 2000, 4000, 8000]),
-  no2:  _leg("no2", UG, [10, 25, 50, 100, 200]),
-  so2:  _leg("so2", UG, [10, 40, 80, 200, 400]),
-  o3:   _leg("o3", UG, [60, 100, 140, 180, 240]),
+            [nama, warna, putih, ISPU_RENTANG[i]]) },
+  pm25: _leg("pm25", UG, [15, 20, 35, 40, 55]),
+  pm10: _leg("pm10", UG, [20, 35, 40, 60, 75]),
+  co:   _leg("co", UG, [500, 1000, 2000, 4000, 8000, 10000]),
+  no2:  _leg("no2", UG, [10, 50, 100, 150, 200]),
+  so2:  _leg("so2", UG, [5, 10, 50, 100, 150]),
+  o3:   _leg("o3", UG, [5, 10, 50, 100, 150]),
   // AOD rasio pelemahan cahaya, memang tak bersatuan.
   aod:  _leg("aod", "AOD 550 nm", [0.2, 0.5, 1, 2, 3]),
   // PBL dalam meter, dibaca seperti legenda polutan. Bedanya arah: di sini yang
@@ -207,6 +205,7 @@ const BORDER_COLOR = {
   cloud_surface: "#39ff14",      // batas hijau neon di atas tutupan awan
   pressure_surface: "#6d7787",   // batas ABU (redup) di layer tekanan → isobar jadi garis utama
   temp_strato: "#000000",        // batas hitam di atas heatmap suhu stratosfer
+  o3: "#ffffff",                 // batas PUTIH: tampil di atas heatmap O3 (oranye-merah-hitam) di darat
 };
 
 // --- LEVEL KETINGGIAN (dropdown LEVEL) ---
@@ -1638,6 +1637,17 @@ async function badanTitik(key, lat, lon) {
   };
 }
 
+// Geser popup titik ke BAWAH marker: offset diukur dari tinggi popup SEBENARNYA
+// (presisi berapa pun isinya), tip disembunyikan via kelas .pt-pop-below.
+function _popupKeBawah(pop) {
+  if (!pop) return;
+  const el = pop.getElement && pop.getElement();
+  const wrap = el && el.querySelector(".leaflet-popup-content-wrapper");
+  const h = wrap ? wrap.offsetHeight : 320;
+  pop.options.offset = L.point(0, h + 22);
+  pop.update();
+}
+
 async function openPoint(lat, lon, label, isMe) {
   const key = activeLayer;
   if (!key) return;
@@ -1651,16 +1661,23 @@ async function openPoint(lat, lon, label, isMe) {
   updateHash();
   const judul = label || fmtCoord(lat, lon);
   const token = ++pointToken;                 // hasil yang telat jangan menimpa titik baru
+  let popupBawah = false;
   if (sidebar) {
     tandaTitik(lat, lon, isMe);
     bukaSidebar(judul, KIMIA_HTML[key] || key, !label);
     isiSidebar('<div class="pt-loading">Memuat…</div>');
   } else {
     hapusTanda();
-    pointPopup = L.popup({ className: "pt-pop", maxWidth: 330, autoPan: true, closeOnClick: false })
+    // Titik di paro ATAS frame: popup default (ke atas) kepotong tepi atas karena
+    // peta terkunci maxBounds (autoPan mentok). Buka KE BAWAH (kelas pt-pop-below,
+    // offset diukur dari tinggi popup lewat _popupKeBawah). Paro bawah tetap ke atas.
+    popupBawah = map.latLngToContainerPoint([lat, lon]).y < map.getSize().y * 0.5;
+    pointPopup = L.popup({ className: popupBawah ? "pt-pop pt-pop-below" : "pt-pop",
+        maxWidth: 330, autoPan: true, autoPanPadding: [16, 16], closeOnClick: false })
       .setLatLng([lat, lon])
       .setContent(`<div class="pp-title">${judul}</div><div class="pp-body">Memuat…</div>`)
       .openOn(map);
+    if (popupBawah) _popupKeBawah(pointPopup);
   }
   try {
     const { par, badan } = await badanTitik(key, lat, lon);
@@ -1677,6 +1694,7 @@ async function openPoint(lat, lon, label, isMe) {
     } else if (pointPopup) {
       pointPopup.setContent(`<div class="pp-title">${judul}<span class="pp-par">${par}</span></div>` +
                             `<div class="pp-body">${badan + tren}</div>`);
+      if (popupBawah) _popupKeBawah(pointPopup);   // tinggi berubah setelah grafik masuk
     }
   } catch (e) {
     console.error(e);
