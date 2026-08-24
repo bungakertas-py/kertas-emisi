@@ -19,9 +19,15 @@ import numpy as np
 import config as C
 from config import KEEP_PAST_HOURS, LAYERS, OUTPUT_DIR
 import cams
+import firms
 from process import (_export_velocity_json, hitung_daya_tampung, hitung_ispu,
-                     luas_sel, write_city_data, write_point_series,
+                     luas_sel, sampel_kota, write_city_data, write_point_series,
                      write_scalar_frame)
+
+# Parameter yang diarsipkan tiap hari: tujuh polutan + ISPU. Format berkas harian
+# ini SUSAH diubah setelah riwayat menumpuk, jadi daftar dan urutannya dipatok.
+ARSIP_PARAM = ["ispu", "pm25", "pm10", "co", "no2", "so2", "o3", "aod"]
+ARSIP_DIR = C.BACKEND_DIR.parent / "frontend" / "data" / "arsip"
 
 
 def _parse(ts: str) -> dt.datetime:
@@ -294,6 +300,16 @@ def main() -> None:
     ukuran = write_city_data(kota_medan, waktu_penuh, grid)
     print(f"  nilai per kota: {len(kota_medan)} parameter, {ukuran/1e6:.2f} MB")
 
+    # Arsip harian (riwayat) + panel peringatan, keduanya diturunkan dari nilai per
+    # kota yang sama, jadi titiknya disampel sekali lalu dipakai bersama.
+    places_k, kota_k = _kota_arsip(kota_medan, grid, waktu_penuh)
+    _tulis_peringatan(places_k, kota_k, waktu_penuh, run)
+    _tulis_arsip(places_k, kota_k, waktu_penuh, run)
+
+    # Overlay titik panas VIIRS (pengamatan, bukan ramalan). Berdiri sendiri, tak
+    # tergantung grid/forecast, jadi kalau gagal pun sisa pipeline tetap terbit.
+    _tulis_titik_api()
+
     ds_s.close(); ds_m.close()
     (OUTPUT_DIR / "point_meta.json").write_text(json.dumps(point_meta, indent=2))
     tot = sum((OUTPUT_DIR / v["file"]).stat().st_size for v in point_meta.values())
@@ -351,10 +367,10 @@ def _tulis_ispu(medan_semua, jam_lead, run, grid, vel_nama, pemanasan=None):
     """ISPU dari jendela BERGULIR 24 jam, bukan blok harian.
 
     Pasal 6 ayat 1 Permen LHK 14/2020: ISPU dihitung tiap jam dari data pemantauan
-    24 jam secara terus-menerus. Cadence kita 3 jam, jadi satu jendela = 9 langkah
-    (t-24 sampai t). Delapan langkah pertama tiap run karena itu TIDAK punya ISPU,
-    jendelanya belum penuh. Lubang itu terisi sendiri oleh frame run sebelumnya
-    yang masih tersimpan dalam retensi -24 jam."""
+    24 jam secara terus-menerus. Jumlah langkah per jendela = ISPU_WINDOW_HOURS //
+    leadtime_step, jadi ikut cadence. Langkah paling awal tiap run bisa TIDAK punya
+    ISPU kalau jendelanya belum penuh. Lubang itu ditambal oleh langkah pemanasan
+    dari run kemarin (di frontend juga oleh frame run sebelumnya dalam retensi)."""
     nwin = C.ISPU_WINDOW_HOURS // C.CAMS["leadtime_step"]
     pakai = [p for p in C.ISPU_PARAM if p in medan_semua]
     # Deret gabungan: langkah pemanasan dari run kemarin di depan, run ini di belakang.
@@ -490,6 +506,196 @@ def _tulis_harian(key, lay, medan, jam_lead, run, grid, vel_nama) -> int:
         waktu.append(valid.strftime("%Y-%m-%dT%H:00:00Z"))
         n += 1
     return n, seri, waktu
+
+
+def _kategori_ispu(v: float) -> str:
+    for batas, nama in C.ISPU_KATEGORI:
+        if v <= batas:
+            return nama
+    return C.ISPU_KATEGORI[-1][1]
+
+
+def _kota_arsip(kota_medan, grid, waktu_penuh):
+    """Sampel 7 polutan + ISPU di titik kota, sekali. Deret yang lebih pendek dari
+    sumbu waktu penuh (mis. ISPU saat jendela belum penuh) DI-KIRI-pad NaN supaya
+    sejajar di ujung, sama seperti city_data."""
+    nt = len(waktu_penuh)
+    src = {k: kota_medan[k] for k in ARSIP_PARAM if kota_medan.get(k)}
+    places, kota = sampel_kota(src, grid)
+    for k, a in list(kota.items()):
+        if a.shape[1] < nt:
+            pad = np.full((a.shape[0], nt - a.shape[1]), np.nan)
+            kota[k] = np.concatenate([pad, a], axis=1)
+    return places, kota
+
+
+def _tulis_peringatan(places, kota, waktu_penuh, run) -> None:
+    """Sapu ISPU tiap kota sepanjang horizon ramalan, tandai yang diperkirakan
+    mencapai Tidak Sehat (ISPU > 100) atau lebih. -> peringatan.json untuk banner."""
+    a = kota.get("ispu")
+    if not places or a is None:
+        print("  peringatan dilewati: ISPU per kota tak ada")
+        return
+    ncity = a.shape[0]
+    daftar = []
+    for i in range(ncity):
+        seri = a[i]
+        if not np.any(np.isfinite(seri)):
+            continue
+        puncak = float(np.nanmax(seri))
+        if puncak <= 100:                         # masih di bawah Tidak Sehat
+            continue
+        ip = int(np.nanargmax(seri))
+        lewat = np.where(seri > 100)[0]           # pertama kali menembus ambang
+        imulai = int(lewat[0]) if lewat.size else ip
+        daftar.append({"n": places[i]["n"],
+                       "lat": round(float(places[i]["lat"]), 4),
+                       "lon": round(float(places[i]["lon"]), 4),
+                       "puncak": round(puncak), "kategori": _kategori_ispu(puncak),
+                       "puncak_waktu": waktu_penuh[ip], "mulai": waktu_penuh[imulai]})
+    daftar.sort(key=lambda d: -d["puncak"])
+    doc = {"generated": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+           "run": run.strftime("%Y-%m-%dT%H:00:00Z"), "ambang": 100, "kota": daftar}
+    (OUTPUT_DIR / "peringatan.json").write_text(json.dumps(doc, separators=(",", ":")),
+                                                encoding="utf-8")
+    print(f"  peringatan: {len(daftar)} kota diperkirakan Tidak Sehat atau lebih")
+
+
+# Pembulatan per parameter di arsip: indeks & CO bilangan bulat, PM & O3 satu
+# desimal, gas kecil (NO2/SO2) dan AOD dua desimal.
+_ARSIP_DESIMAL = {"ispu": 0, "co": 0, "pm25": 1, "pm10": 1, "o3": 1,
+                  "no2": 2, "so2": 2, "aod": 2}
+
+
+def _tulis_arsip(places, kota, waktu_penuh, run) -> None:
+    """Simpan rata-rata harian per kota (7 polutan + ISPU) untuk SATU tanggal WIB,
+    lalu bangun ulang harian.json (gabungan) untuk grafik tren di frontend.
+
+    Tiap hari nyata menyumbang satu entri. Berkas per-tanggal bersifat TAMBAH-SAJA,
+    tak pernah ditulis ulang, jadi riwayat menumpuk aman lintas run di Actions yang
+    selalu checkout bersih. Gabungannya diturunkan ulang tiap kali dari semua
+    berkas per-tanggal yang tersedia di checkout."""
+    if not places:
+        print("  arsip dilewati: titik kota tak ada")
+        return
+    tgl = [(_parse(w) + dt.timedelta(hours=C.WIB)).strftime("%Y-%m-%d") for w in waktu_penuh]
+    urut = list(dict.fromkeys(tgl))
+
+    def idx(t):
+        return [k for k, x in enumerate(tgl) if x == t]
+
+    # Ambil hari WIB pertama yang HAMPIR PENUH (>=20 dari 24 jam), supaya rata-rata
+    # harian yang ditabung selalu satu hari genap dan sebanding antar tanggal, tak
+    # tergantung run itu jam 00 atau 12 UTC. Run 12Z membuat "hari ini" WIB cuma
+    # berisi jam sore (~5 jam), rata-ratanya akan menyesatkan.
+    target = next((t for t in urut if len(idx(t)) >= 20), None)
+    if target is None:                       # forecast terlalu pendek, pakai yang terpanjang
+        target = max(urut, key=lambda t: len(idx(t))) if urut else None
+    if target is None:
+        print("  arsip dilewati: tak ada tanggal")
+        return
+    sel = idx(target)
+    nkota = len(places)
+    nilai = {}
+    for par in ARSIP_PARAM:
+        a = kota.get(par)
+        if a is None or a.shape[1] != len(waktu_penuh):
+            nilai[par] = [None] * nkota
+            continue
+        rata = np.nanmean(a[:, sel], axis=1)
+        nd = _ARSIP_DESIMAL[par]
+        nilai[par] = [None if not np.isfinite(x) else round(float(x), nd) for x in rata]
+
+    ARSIP_DIR.mkdir(parents=True, exist_ok=True)
+    doc = {"date": target, "run": run.strftime("%Y-%m-%dT%H:00:00Z"),
+           "params": ARSIP_PARAM, "places": [p["n"] for p in places], "nilai": nilai}
+    (ARSIP_DIR / f"{target}.json").write_text(json.dumps(doc, separators=(",", ":")),
+                                              encoding="utf-8")
+    _bangun_arsip_gabungan(places)
+    print(f"  arsip harian: {target} ({len(sel)} langkah) -> {target}.json")
+
+
+def _bangun_arsip_gabungan(places) -> None:
+    """Kumpulkan semua berkas per-tanggal jadi satu harian.json untuk frontend.
+
+    Berkas dengan daftar kota berbeda (mis. dari versi lama) dilewati, supaya
+    kolomnya tak bergeser saat daftar kota berubah."""
+    nama_kota = [p["n"] for p in places]
+    per = {}
+    for f in sorted(glob.glob(str(ARSIP_DIR / "20*-*-*.json"))):
+        try:
+            d = json.loads(Path(f).read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if d.get("places") != nama_kota or "date" not in d:
+            continue
+        per[d["date"]] = d["nilai"]
+    dates = sorted(per)
+    data = {par: [per[dd].get(par, [None] * len(nama_kota)) for dd in dates]
+            for par in ARSIP_PARAM}
+    doc = {"params": ARSIP_PARAM, "places": nama_kota, "dates": dates, "data": data,
+           "updated": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    (ARSIP_DIR / "harian.json").write_text(json.dumps(doc, separators=(",", ":")),
+                                           encoding="utf-8")
+
+
+# Urutan keyakinan VIIRS: low < nominal < high.
+_CONF_URUT = {"l": 0, "n": 1, "h": 2}
+
+
+def _tulis_titik_api() -> None:
+    """Overlay titik panas VIIRS (FIRMS) 48 jam terakhir -> titik_api.json.
+
+    PENGAMATAN satelit, BUKAN ramalan, jadi berdiri lepas dari sumbu waktu forecast.
+    Kalau MAP_KEY tak ada atau unduhan gagal, DILEWATI tanpa mematikan pipeline:
+    layer asap tetap terbit walau overlay api absen."""
+    try:
+        baris = firms.ambil()
+    except Exception as ex:
+        print(f"  titik api dilewati: {ex}")
+        return
+    minc = _CONF_URUT.get(C.FIRMS["min_confidence"], 1)
+    minfrp = C.FIRMS.get("min_frp", 0)
+    titik = []
+    for b in baris:
+        conf = (b.get("confidence") or "").strip().lower()
+        if _CONF_URUT.get(conf, 1) < minc:
+            continue
+        try:
+            la = round(float(b["latitude"]), 4)
+            lo = round(float(b["longitude"]), 4)
+            frp = round(float(b.get("frp") or 0), 1)
+        except (KeyError, ValueError):
+            continue
+        if frp < minfrp:                       # hanya api kuat (lihat config.min_frp)
+            continue
+        hhmm = (b.get("acq_time") or "0000").strip().zfill(4)
+        waktu = f"{b.get('acq_date', '')}T{hhmm[:2]}:{hhmm[2:4]}:00Z"
+        titik.append({"la": la, "lo": lo, "f": frp, "c": conf, "t": waktu,
+                      "s": (b.get("satellite") or "").strip()})
+
+    # Gabung titik rangkap ke sel grid, diwakili FRP TERTINGGI per sel. Alasannya di
+    # config.FIRMS["dedup_deg"]. Dicatat berapa yang digabung, bukan dipotong diam-diam.
+    sel = C.FIRMS.get("dedup_deg", 0)
+    kasar = len(titik)
+    if sel:
+        terbaik = {}
+        for p in titik:
+            k = (round(p["la"] / sel), round(p["lo"] / sel))
+            if k not in terbaik or p["f"] > terbaik[k]["f"]:
+                terbaik[k] = p
+        titik = list(terbaik.values())
+        print(f"  titik api: {kasar} -> {len(titik)} setelah gabung sel ~{sel*111:.0f} km")
+
+    # Terpanas duluan: saat digambar, titik ber-FRP besar ada di urutan akhir array
+    # sehingga tumpang di ATAS titik kecil. (Leaflet menggambar sesuai urutan tambah.)
+    titik.sort(key=lambda d: d["f"])
+    doc = {"generated": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+           "hari": C.FIRMS["hari"], "sumber": "VIIRS 375 m, NASA FIRMS (LANCE)",
+           "titik": titik}
+    (OUTPUT_DIR / "titik_api.json").write_text(json.dumps(doc, separators=(",", ":")),
+                                               encoding="utf-8")
+    print(f"  titik api: {len(titik)} hotspot -> titik_api.json")
 
 
 if __name__ == "__main__":

@@ -45,11 +45,37 @@ GFS = {
 CAMS = {
     "dataset": "cams-global-atmospheric-composition-forecasts",
     "api": "https://ads.atmosphere.copernicus.eu/api",
-    # Ambil tiap 3 jam, bukan tiap jam. 121 frame terlalu berat untuk dirender tiap
-    # hari, sedangkan polusi skala regional tak berubah drastis dalam 3 jam.
-    "leadtime_step": 3,
+    # Ambil TIAP JAM (121 langkah, 0..120). Sebelumnya tiap 3 jam demi hemat, tapi
+    # jatah GitHub Pages masih longgar (situs ~130 MB dari 1 GB) dan Actions gratis,
+    # jadi resolusi penuh dipakai supaya animasi mulus dan jendela ISPU/daya tampung
+    # 24 jam terisi rapat, bukan lompat 3 jam.
+    "leadtime_step": 1,
     "leadtime_max": 120,
     "runs": ["00:00", "12:00"],
+}
+
+# --- FIRMS: titik panas (hotspot) VIIRS, NASA LANCE, near-real-time (terbuka) ---
+# PENGAMATAN satelit, BUKAN ramalan. Latensi ~3 jam, bisa terlewat bila tertutup
+# awan. Dipakai sebagai overlay titik di atas layer asap CAMS: "ini ramalan asap,
+# dan ini api yang benar-benar terdeteksi 48 jam terakhir". Butuh MAP_KEY gratis.
+FIRMS = {
+    "api": "https://firms.modaps.eosdis.nasa.gov/api/area/csv",
+    # VIIRS 375 m dari tiga satelit, digabung. MODIS (1 km) sengaja tak dipakai,
+    # resolusinya lebih kasar dan sudah dilingkupi VIIRS.
+    "sources": ["VIIRS_SNPP_NRT", "VIIRS_NOAA20_NRT", "VIIRS_NOAA21_NRT"],
+    "hari": 2,                              # rentang hari ke belakang (1..10), 2 = ~48 jam
+    # Kotak batas (barat, selatan, timur, utara). Sengaja Indonesia-sentris, lebih
+    # sempit dari domain CAMS: titik api yang relevan buat asap Indonesia ada di sini.
+    "area": (94.0, -11.5, 141.5, 7.5),
+    "min_confidence": "n",                  # buang deteksi 'low', simpan 'nominal' & 'high'
+    # Hanya tampilkan api KUAT: FRP >= 30 MW (kategori "kuat" ke atas). Deteksi
+    # kecil/sedang (api ladang, tungku) terlalu ramai dan bukan yang bikin kabut
+    # asap. Ambang ini menyisakan ratusan titik paling berarti, peta tetap bersih.
+    "min_frp": 30.0,
+    # Musim karhutla bisa >16 rb titik, banyak yang rangkap (3 satelit memotret api
+    # yang sama dalam jarak meteran). Digabung ke sel ~2 km, diwakili FRP tertinggi:
+    # ~3x lebih ringan buat HP tanpa menghilangkan pola sebaran atau puncak intensitas.
+    "dedup_deg": 0.02,
 }
 
 # Tujuh parameter. `single` = variabel permukaan satu level. `model` = variabel 3D,
@@ -120,8 +146,9 @@ ISPU_TABEL = {
 # Urutan ini yang dipakai sebagai KODE pencemar kritis di berkas deret titik.
 ISPU_PARAM = ["pm25", "pm10", "co", "no2", "so2", "o3"]
 # Pasal 6 ayat 1: ISPU dihitung tiap jam dari data pemantauan 24 jam terus-menerus.
-# Jadi jendelanya BERGULIR 24 jam, bukan blok harian. Cadence kita 3 jam, jadi satu
-# jendela = 9 langkah (t-24 sampai t).
+# Jadi jendelanya BERGULIR 24 jam, bukan blok harian. Jumlah langkah per jendela
+# dihitung dari cadence (ISPU_WINDOW_HOURS // leadtime_step), jadi ikut sendiri saat
+# cadence diubah. Dengan cadence per jam, satu jendela = 25 langkah (t-24 sampai t).
 ISPU_WINDOW_HOURS = 24
 # Di atas baris terakhir tabel aturan tak mengatur apa-apa. Kemiringan pita terakhir
 # diteruskan lalu dipotong di sini, supaya asap karhutla ekstrem tetap punya angka

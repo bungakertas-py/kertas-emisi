@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write     # commit-back arsip harian (riwayat) ke repo
   pages: write
   id-token: write
 
@@ -38,7 +38,24 @@ jobs:
         working-directory: backend/pipeline
         env:
           ADS_KEY: ${{ secrets.ADS_KEY }}
+          FIRMS_KEY: ${{ secrets.FIRMS_KEY }}    # MAP_KEY NASA FIRMS untuk overlay titik api
         run: python run.py
+
+      # Riwayat harian ditabung di repo (bukan cuma di artifact): output backend
+      # gitignored & runner selalu checkout bersih, jadi tanpa commit-back arsip
+      # tak pernah menumpuk. [skip ci] mencegah commit ini memicu deploy ulang.
+      - name: Simpan arsip harian (riwayat) ke repo
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "peta-cuaca"
+          git config user.email "peta-cuaca@users.noreply.github.com"
+          git add frontend/data/arsip
+          if git diff --cached --quiet; then
+            echo "arsip tak berubah, lewati commit"
+          else
+            git commit -m "Arsip harian kualitas udara [skip ci]"
+            git push
+          fi
 
       - name: Assemble site (jaga struktur ../backend/data/output)
         run: |

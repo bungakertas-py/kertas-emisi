@@ -334,12 +334,14 @@ def _skala_tangga(batas, warna):
 #
 # Palet bwr matplotlib DIBALIK dan sisi birunya diganti hijau, jadi merah-putih-hijau.
 # Arahnya sengaja begitu: MERAH berarti beban maksimum terlampaui, HIJAU berarti
-# masih ada daya tampung. Dipotong jadi PITA 20.000 ton/tahun dari -100K sampai
-# +100K, bertingkat bukan gradasi mulus supaya beda antar sel terbaca. Di luar
-# rentang itu warnanya jenuh, dan itu disengaja: sel karhutla bisa mencapai
-# -6,8 juta, kalau sumbunya dipaksa memuat itu seluruh peta lain jadi putih.
-_DT_RENTANG = 100_000.0
-_DT_LANGKAH = 20_000.0
+# masih ada daya tampung. Dipotong jadi PITA 10.000 ton/tahun dari -50K sampai
+# +50K, bertingkat bukan gradasi mulus supaya beda antar sel terbaca. Rentang
+# dirapatkan dari +-100K/20K karena sebaran nyata menumpuk dekat nol, dengan pita
+# lama cuma 3 dari 10 pita terisi. Di luar rentang itu warnanya jenuh, dan itu
+# disengaja: sel karhutla bisa mencapai -6,8 juta, kalau sumbunya dipaksa memuat
+# itu seluruh peta lain jadi putih.
+_DT_RENTANG = 50_000.0
+_DT_LANGKAH = 10_000.0
 _DT_ALPHA = 225
 # Warna diambil di TENGAH tiap pita pada palet bwr.
 _DT_PITA = [
@@ -946,19 +948,11 @@ _CITY_ENC = {
 }
 
 
-def write_city_data(medan: dict, times: list, grid: dict, out_dir: Path = OUTPUT_DIR) -> int:
-    """Sampel bilinear tiap parameter di titik kota/kabupaten -> city_data.json.
+def _kota_titik(grid: dict):
+    """Precompute indeks bilinear untuk 514 titik kota + fungsi penyampel satu medan.
 
-    Label kota cuma butuh nilai di 514 titik, bukan seluruh grid 296x165. Kalau
-    frontend memakai pd_*.bin.gz (belasan MB) demi angka segitu, hampir seluruh
-    isinya terbuang. Jadi disampel di sini, sekali saat pipeline jalan.
-
-    `medan` = {kunci_layer: daftar array}. Daftar yang lebih PENDEK dari `times`
-    dianggap mulai belakangan (mis. ISPU saat pemanasan gagal) dan bagian depannya
-    diisi null, bukan diulang, supaya frontend tak menampilkan angka karangan."""
-    if not CITY_PLACES.exists():
-        print(f"  city_data dilewati: {CITY_PLACES.name} tak ada")
-        return 0
+    Dipisah supaya write_city_data, arsip harian, dan panel peringatan memakai
+    penempatan titik yang PERSIS SAMA."""
     places = json.loads(CITY_PLACES.read_text(encoding="utf-8"))
     nx, ny = grid["width"], grid["height"]
     dx = (grid["east"] - grid["west"]) / (nx - 1)
@@ -976,6 +970,39 @@ def write_city_data(medan: dict, times: list, grid: dict, out_dir: Path = OUTPUT
         bawah = a[y1, x0] * (1 - tx) + a[y1, x1] * tx
         return atas * (1 - ty) + bawah * ty
 
+    return places, samp
+
+
+def sampel_kota(medan: dict, grid: dict) -> tuple[list, dict]:
+    """Sampel bilinear tiap parameter di titik kota, NaN dipertahankan.
+
+    Return (places, {kunci: array (nkota, nwaktu)}). Dipakai bersama oleh arsip
+    harian dan panel peringatan, jadi penyamplingan cuma sekali."""
+    if not CITY_PLACES.exists():
+        return [], {}
+    places, samp = _kota_titik(grid)
+    out = {}
+    for kunci, arr in medan.items():
+        if not arr:
+            continue
+        out[kunci] = np.stack([samp(a) for a in arr]).T   # (nkota, nwaktu)
+    return places, out
+
+
+def write_city_data(medan: dict, times: list, grid: dict, out_dir: Path = OUTPUT_DIR) -> int:
+    """Sampel bilinear tiap parameter di titik kota/kabupaten -> city_data.json.
+
+    Label kota cuma butuh nilai di 514 titik, bukan seluruh grid 296x165. Kalau
+    frontend memakai pd_*.bin.gz (belasan MB) demi angka segitu, hampir seluruh
+    isinya terbuang. Jadi disampel di sini, sekali saat pipeline jalan.
+
+    `medan` = {kunci_layer: daftar array}. Daftar yang lebih PENDEK dari `times`
+    dianggap mulai belakangan (mis. ISPU saat pemanasan gagal) dan bagian depannya
+    diisi null, bukan diulang, supaya frontend tak menampilkan angka karangan."""
+    if not CITY_PLACES.exists():
+        print(f"  city_data dilewati: {CITY_PLACES.name} tak ada")
+        return 0
+    places, samp = _kota_titik(grid)
     nt = len(times)
     data, skala = {}, {}
     for kunci, arr in medan.items():
