@@ -43,6 +43,23 @@ const _leg = (key, head, ambang) => ({
 });
 // Rentang tiap kategori, ditulis apa adanya seperti Lampiran II.A.
 const ISPU_RENTANG = ["1-50", "51-100", "101-200", "201-300", "\u2265301"];
+
+// AQI (US EPA), PEMBANDING ISPU. Cermin AQI_KAT/AQI_WARNA di process.py. Warna
+// resmi EPA, enam kategori. [batas atas, nama, warna, teks putih]. Nama Inggris
+// karena ini indeks luar negeri.
+const AQI_KAT = [
+  [50,  "Good",                 "#00e400", 0],
+  [100, "Moderate",             "#ffff00", 0],
+  [150, "Unhealthy (Sensitif)", "#ff7e00", 0],
+  [200, "Unhealthy",            "#ff0000", 1],
+  [300, "Very Unhealthy",       "#8f3f97", 1],
+  [Infinity, "Hazardous",       "#7e0023", 1],
+];
+function aqiKategori(v) {
+  for (const k of AQI_KAT) if (v <= k[0]) return k;
+  return AQI_KAT[AQI_KAT.length - 1];
+}
+const AQI_RENTANG = ["0-50", "51-100", "101-150", "151-200", "201-300", "\u2265301"];
 const LEGENDS = {
   // Sel ISPU DUA BARIS: nama kategori di atas, rentang angkanya di bawah. Orang awam
   // membaca kategorinya, orang yang terbiasa dengan ISPU mencari bilangannya.
@@ -52,6 +69,10 @@ const LEGENDS = {
   ispu: { head: "ISPU", words: 1,
           cells: ISPU_KAT.map(([, nama, warna, putih], i) =>
             [nama, warna, putih, ISPU_RENTANG[i]]) },
+  // AQI pembanding: sel dua baris juga, nama kategori EPA di atas, rentang di bawah.
+  aqi:  { head: "AQI", words: 1,
+          cells: AQI_KAT.map(([, nama, warna, putih], i) =>
+            [nama, warna, putih, AQI_RENTANG[i]]) },
   pm25: _leg("pm25", UG, [15, 20, 35, 40, 55]),
   pm10: _leg("pm10", UG, [20, 35, 40, 60, 75]),
   co:   _leg("co", UG, [500, 1000, 2000, 4000, 8000, 10000]),
@@ -166,14 +187,14 @@ function mintaSandiDT() {
 // Rumus kimia ditulis dengan angka turun. Dua bentuk: <sub> untuk tempat yang
 // menerima HTML, karakter Unicode untuk atribut & teks polos (tooltip, judul, share).
 const KIMIA_HTML = {
-  ispu: "ISPU", pm25: "PM<sub>2.5</sub>", pm10: "PM<sub>10</sub>", co: "CO",
+  ispu: "ISPU", aqi: "AQI", pm25: "PM<sub>2.5</sub>", pm10: "PM<sub>10</sub>", co: "CO",
   no2: "NO<sub>2</sub>", so2: "SO<sub>2</sub>", o3: "O<sub>3</sub>", aod: "Kabut Asap",
   pbl: "PBLH",
   dt_pm25: "Daya Tampung PM<sub>2.5</sub>", dt_pm10: "Daya Tampung PM<sub>10</sub>",
   dt_so2: "Daya Tampung SO<sub>2</sub>", dt_no2: "Daya Tampung NO<sub>2</sub>",
 };
 const KIMIA_TEKS = {
-  ispu: "ISPU", pm25: "PM\u2082.\u2085", pm10: "PM\u2081\u2080", co: "CO",
+  ispu: "ISPU", aqi: "AQI", pm25: "PM\u2082.\u2085", pm10: "PM\u2081\u2080", co: "CO",
   no2: "NO\u2082", so2: "SO\u2082", o3: "O\u2083", aod: "Kabut Asap",
   pbl: "PBLH",
   dt_pm25: "Daya Tampung PM\u2082.\u2085", dt_pm10: "Daya Tampung PM\u2081\u2080",
@@ -190,7 +211,7 @@ const LAYER_THEME = {
   // Daya tampung memakai alas GELAP, bukan terang seperti tiga layer di atas.
   // Titik tengah palet bwr itu PUTIH, dan putih di atas alas terang lenyap sama
   // sekali; sel yang nyaris pas di ambang justru akan tampak seperti lubang.
-  ispu: "light", o3: "light", aod: "light",
+  ispu: "light", aqi: "light", o3: "light", aod: "light",
   dt_pm25: "dark", dt_pm10: "dark", dt_so2: "dark", dt_no2: "dark",
   pm25: "dark", pm10: "dark", co: "dark", no2: "dark", so2: "dark", pbl: "dark",
   wind_surface: "dark", rain_surface: "dark", rain_accum_surface: "dark",
@@ -566,7 +587,13 @@ function buildTicks() {
   wrap.innerHTML = frames.map((f, i) => {
     const wib = toWIB(f.valid_time);
     const day = wib.getUTCDate();
-    const isDay = i === 0 || day !== prevDay;
+    // Frame 0 hanya dilabeli kalau memang hari tersendiri (layer HARIAN). Di layer
+    // per-jam frame 0 itu hari yang belum genap; dulu labelnya dipaksa muncul lalu
+    // menyerempet label tengah malam pertama, jadi terlihat bertumpuk di awal.
+    // Sekarang tanggal cuma muncul di pergantian hari yang sebenarnya.
+    const isDay = i === 0
+      ? (n <= 1 || day !== toWIB(frames[1].valid_time).getUTCDate())
+      : day !== prevDay;
     prevDay = day;
     const pos = n === 1 ? 0 : (i / (n - 1)) * 100;
     const edge = i === 0 ? " edge-start" : (i === n - 1 ? " edge-end" : "");
@@ -1590,6 +1617,22 @@ async function badanTitik(key, lat, lon) {
     kepala = `<div class="pp-ispu${putih ? " putih" : ""}" style="background:${bg}">` +
              `<b>${nilai}</b><span>${nama}</span></div>${kritis}`;
   }
+  if (key === "aqi") {
+    // AQI (US EPA), pembanding ISPU. Sama pola: nilai + kategori + polutan dominan.
+    const i = Math.max(0, nearestIndex(pd.meta.times, frames[current] && frames[current].valid_time));
+    const nilai = Math.round(vals[i]);
+    const [, nama, bg, putih] = aqiKategori(nilai);
+    warna = bg;
+    let dom = "";
+    try {
+      const pk = await loadSeries("aqi_kritis");
+      const kode = sampleSeriesNearest(pk, lat, lon);
+      const par = (pd.meta.kritis_param || [])[Math.round(kode[i])];
+      if (par) dom = `<div class="pp-kritis">Polutan dominan <b>${KIMIA_HTML[par] || par}</b></div>`;
+    } catch (e) { console.warn("polutan dominan AQI tak terbaca", e); }
+    kepala = `<div class="pp-ispu${putih ? " putih" : ""}" style="background:${bg}">` +
+             `<b>${nilai}</b><span>${nama}</span></div>${dom}`;
+  }
   const parDT = key.startsWith("dt_") ? key.slice(3) : null;
   if (parDT) {
     // Daya tampung: angka + kategori + pecahannya. BE max dan BE eks tak perlu
@@ -1624,6 +1667,7 @@ async function badanTitik(key, lat, lon) {
              `<div class="pp-kritis">ton/tahun, Permen LH No. 5</div>${rinci}`;
   }
   const pita = key === "ispu" ? ISPU_KAT.map(([batas, , col]) => [batas, col])
+    : key === "aqi" ? AQI_KAT.map(([batas, , col]) => [batas, col])
     // Dua pita saja, dipisah di NOL. Itu satu-satunya batas yang punya dasar.
     : parDT ? [[0, "#ff4c4c"], [Infinity, "#4cff4c"]]
     : null;

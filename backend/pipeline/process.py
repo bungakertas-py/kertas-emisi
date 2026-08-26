@@ -19,7 +19,8 @@ import numpy as np
 import xarray as xr
 from PIL import Image, ImageDraw
 
-from config import (BACKEND_DIR, BMUA_24JAM, DT_PARAM, HARI_PER_TAHUN, ISPU_MAKS,
+from config import (AQI_MAKS, AQI_PARAM, AQI_SIMPUL, AQI_TABEL, BACKEND_DIR,
+                    BMUA_24JAM, DT_PARAM, HARI_PER_TAHUN, ISPU_MAKS,
                     ISPU_PARAM, ISPU_SIMPUL, ISPU_TABEL, LAYERS, OUTPUT_DIR,
                     RADIUS_BUMI, REGION, UG_PER_TON)
 
@@ -480,6 +481,21 @@ _ISPU_BATAS = [0, 50, 100, 200, 300, ISPU_MAKS]
 _ISPU_SCALE = _skala_tangga(_ISPU_BATAS, _ISPU_WARNA)
 
 
+# AQI (US EPA), pembanding ISPU. Warna resmi EPA, hijau -> marun. Alpha menaik
+# seperti ISPU (rendah setengah tembus, tinggi hampir pejal). Enam kategori,
+# batasnya TEGAS (kategori), sama perlakuannya dengan ISPU di render.
+_AQI_WARNA = [
+    (0x00, 0xe4, 0x00, 165),   # Good
+    (0xff, 0xff, 0x00, 180),   # Moderate
+    (0xff, 0x7e, 0x00, 200),   # Unhealthy (Sensitif)
+    (0xff, 0x00, 0x00, 218),   # Unhealthy
+    (0x8f, 0x3f, 0x97, 232),   # Very Unhealthy
+    (0x7e, 0x00, 0x23, 244),   # Hazardous
+]
+_AQI_BATAS = [0, 50, 100, 150, 200, 300, AQI_MAKS]
+_AQI_SCALE = _skala_tangga(_AQI_BATAS, _AQI_WARNA)
+
+
 def subindeks_ispu(par: str, x: np.ndarray) -> np.ndarray:
     """Konsentrasi rata 24 jam (ug/m3) -> nilai ISPU parameter itu.
 
@@ -509,6 +525,36 @@ def hitung_ispu(rata: dict) -> tuple[np.ndarray, np.ndarray]:
     # petakan indeks lokal -> indeks resmi di ISPU_PARAM
     peta = np.array([ISPU_PARAM.index(p) for p in pakai])
     return ispu, peta[kritis_lokal].astype("int16")
+
+
+def subindeks_aqi(par: str, x: np.ndarray) -> np.ndarray:
+    """Konsentrasi (ug/m3, jendela EPA) -> sub-indeks AQI parameter itu.
+
+    Interpolasi linear antar breakpoint EPA yang sudah dikonversi ke ug/m3
+    (AQI_TABEL). Di atas baris terakhir, kemiringan pita terakhir diteruskan
+    lalu dipotong di AQI_MAKS, sama polanya dengan subindeks_ispu."""
+    X = AQI_TABEL[par]
+    y = np.interp(x, X, AQI_SIMPUL)
+    atas = X[-1]
+    lewat = x > atas
+    if lewat.any():
+        kemiringan = (AQI_SIMPUL[-1] - AQI_SIMPUL[-2]) / (atas - X[-2])
+        y = np.where(lewat, AQI_SIMPUL[-1] + (x - atas) * kemiringan, y)
+    return np.clip(y, 0, AQI_MAKS)
+
+
+def hitung_aqi(rata: dict) -> tuple[np.ndarray, np.ndarray]:
+    """AQI (US EPA) akhir + kode polutan dominan, dari rata jendela EPA per parameter.
+
+    Sama prinsip dengan ISPU, 'polutan terburuk menang': AQI = sub-indeks TERTINGGI
+    di antara parameter. `rata` = {parameter: array rata jendela EPA-nya}. Kode
+    dominan = indeks di AQI_PARAM."""
+    pakai = [p for p in AQI_PARAM if p in rata]
+    tumpuk = np.stack([subindeks_aqi(p, rata[p]) for p in pakai])
+    dom_lokal = np.argmax(tumpuk, axis=0)
+    aqi = np.take_along_axis(tumpuk, dom_lokal[None], axis=0)[0]
+    peta = np.array([AQI_PARAM.index(p) for p in pakai])
+    return aqi, peta[dom_lokal].astype("int16")
 
 
 def _load_wind(grib_path: Path) -> tuple[np.ndarray, np.ndarray, dict]:
@@ -640,7 +686,7 @@ def _scalar_to_rgba(values: np.ndarray, scale: list) -> np.ndarray:
 # lossless. Alasannya kategori ISPU itu diskret. Waktu sempat dihaluskan bilinear,
 # 28 persen piksel jatuh ke warna antara (mis. olive, campuran kuning Tidak Sehat
 # dan hitam Berbahaya) yang tak mewakili kategori mana pun.
-_LAYER_KATEGORI = {"ispu", *(f"dt_{p}" for p in DT_PARAM)}
+_LAYER_KATEGORI = {"ispu", "aqi", *(f"dt_{p}" for p in DT_PARAM)}
 # Garis kisi menyesuaikan diri: sel terang digelapkan, sel gelap diterangkan. Kalau
 # dipatok satu warna, kisi di sel hitam (Berbahaya) akan lenyap.
 _KISI_CAMPUR = 0.34
@@ -711,7 +757,7 @@ _SCALAR_SCALES = {
     "cin_surface": _CIN_SCALE,
     "pm25": _PM25_SCALE, "pm10": _PM10_SCALE, "co": _CO_SCALE,
     "no2": _NO2_SCALE, "so2": _SO2_SCALE, "o3": _O3_SCALE, "aod": _AOD_SCALE,
-    "ispu": _ISPU_SCALE, "pbl": _PBL_SCALE, **_DT_SCALES,
+    "ispu": _ISPU_SCALE, "aqi": _AQI_SCALE, "pbl": _PBL_SCALE, **_DT_SCALES,
 }
 
 
@@ -911,6 +957,8 @@ _PD_SCALE = {"pm25": 1.0, "pm10": 1.0, "co": 10.0, "no2": 0.1,
              # ISPU dilaporkan sebagai bilangan bulat, jadi skala 1 sudah pas.
              # Kode pencemar kritis itu indeks 0..5, bukan besaran.
              "ispu": 1.0, "ispu_kritis": 1.0,
+             # AQI (US EPA) juga bilangan bulat; kode dominan indeks 0..5.
+             "aqi": 1.0, "aqi_kritis": 1.0,
              # PBL dalam meter, puncaknya ~3000. Muat di int16 tanpa diskalakan.
              "pbl": 1.0,
              # Daya tampung dalam ton/tahun, rentangnya lebar (ratusan ribu sampai

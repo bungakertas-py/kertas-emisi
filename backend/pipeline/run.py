@@ -20,9 +20,9 @@ import config as C
 from config import KEEP_PAST_HOURS, LAYERS, OUTPUT_DIR
 import cams
 import firms
-from process import (_export_velocity_json, hitung_daya_tampung, hitung_ispu,
-                     luas_sel, sampel_kota, write_city_data, write_point_series,
-                     write_scalar_frame)
+from process import (_export_velocity_json, hitung_aqi, hitung_daya_tampung,
+                     hitung_ispu, luas_sel, sampel_kota, write_city_data,
+                     write_point_series, write_scalar_frame)
 
 # Parameter yang diarsipkan tiap hari: tujuh polutan + ISPU. Format berkas harian
 # ini SUSAH diubah setelah riwayat menumpuk, jadi daftar dan urutannya dipatok.
@@ -269,6 +269,22 @@ def main() -> None:
           f"indeks (jendela {C.ISPU_WINDOW_HOURS} jam bergulir)")
     _ringkas_kritis(seri_i, seri_k)
 
+    # AQI (US EPA), PEMBANDING ISPU. Basis rata bergulir yang sama, tapi jendela
+    # per polutan gaya EPA dan skala indeks berbeda. Pakai pemanasan yang sama.
+    seri_a, seri_ak, waktu_a = _tulis_aqi(medan_semua, jam_lead, run, grid, vel_nama, pra)
+    pm = write_point_series("aqi", seri_a, waktu_a, grid)
+    pm.update({"units": "", "daily": False})
+    pmak = write_point_series("aqi_kritis", seri_ak, waktu_a, grid)
+    pmak.update({"units": "", "daily": False})
+    pm["kritis_file"] = pmak["file"]
+    pm["kritis_param"] = C.AQI_PARAM
+    point_meta["aqi"] = pm
+    point_meta["aqi_kritis"] = pmak
+    rata_a = np.nanmean([m.mean() for m in seri_a])
+    maks_a = np.nanmax([np.nanmax(m) for m in seri_a])
+    print(f"  {'aqi':5} {len(seri_a):>3} frame  rata {rata_a:9.3f}  maks {maks_a:10.2f}  "
+          f"indeks EPA (pembanding ISPU)")
+
     # ---- Daya tampung udara (Permen LH No. 5), satu layer per parameter ----
     lsm = _muat_lsm(hari, jam_run, grid, up)
     seri_dt, vol_dt, waktu_dt, luas_darat = _tulis_daya_tampung(
@@ -391,6 +407,37 @@ def _tulis_ispu(medan_semua, jam_lead, run, grid, vel_nama, pemanasan=None):
                            extra={"model": "CAMS", "velocity_json": vel_nama[fstep],
                                   "window_hours": C.ISPU_WINDOW_HOURS})
         seri.append(ispu)
+        seri_kritis.append(kritis)
+        waktu.append(valid.strftime("%Y-%m-%dT%H:00:00Z"))
+    return seri, seri_kritis, waktu
+
+
+def _tulis_aqi(medan_semua, jam_lead, run, grid, vel_nama, pemanasan=None):
+    """AQI (US EPA), pembanding ISPU. Jendela rata-rata BEDA per polutan sesuai EPA:
+    PM 24 jam, O3 dan CO 8 jam, SO2 dan NO2 1 jam. Selebihnya seperti _tulis_ispu:
+    langkah pemanasan run kemarin ditaruh di depan untuk mengisi jendela awal.
+
+    Jendela terpanjang (PM 24 jam) yang menentukan mulai dari langkah mana AQI
+    punya angka; itu sama dengan jendela ISPU, jadi pemanasan yang sama cukup."""
+    step = C.CAMS["leadtime_step"]
+    nmax = C.ISPU_WINDOW_HOURS // step        # jendela terpanjang = PM 24 jam
+    pakai = [p for p in C.AQI_PARAM if p in medan_semua]
+    gab = {p: list((pemanasan or {}).get(p, [])) + list(medan_semua[p]) for p in pakai}
+    geser = len(gab[pakai[0]]) - len(jam_lead)
+    mulai = 0 if geser >= nmax else nmax - geser
+    seri, seri_kritis, waktu = [], [], []
+    for i in range(mulai, len(jam_lead)):
+        j = geser + i
+        rata = {}
+        for par in pakai:
+            w = max(1, C.AQI_WINDOW_HOURS[par] // step)
+            rata[par] = np.nanmean(np.stack(gab[par][slice(j - w + 1, j + 1)]), axis=0)
+        aqi, kritis = hitung_aqi(rata)
+        fstep = jam_lead[i]
+        valid = run + dt.timedelta(hours=fstep)
+        write_scalar_frame(aqi, grid, "aqi", run, valid, "", f"f{fstep:03d}",
+                           extra={"model": "CAMS", "velocity_json": vel_nama[fstep]})
+        seri.append(aqi)
         seri_kritis.append(kritis)
         waktu.append(valid.strftime("%Y-%m-%dT%H:00:00Z"))
     return seri, seri_kritis, waktu

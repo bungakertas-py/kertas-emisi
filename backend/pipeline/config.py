@@ -89,6 +89,8 @@ LAYERS = {
     # ISPU bukan variabel CAMS, dia TURUNAN dari enam parameter di bawah. src
     # "turunan" membuatnya dilewati saat menyusun permintaan unduhan.
     "ispu": {"src": "turunan", "daily": False, "units": "", "level_label": "surface"},
+    # AQI (US EPA), PEMBANDING ISPU. Turunan juga, dari enam parameter yang sama.
+    "aqi":  {"src": "turunan", "daily": False, "units": "", "level_label": "surface"},
     "pm25": {"cams_var": "particulate_matter_2.5um", "nc_var": "pm2p5", "src": "single",
              "conv": "massa", "daily": True, "units": "\u00b5g/m\u00b3", "level_label": "surface"},
     "pm10": {"cams_var": "particulate_matter_10um", "nc_var": "pm10", "src": "single",
@@ -157,6 +159,41 @@ ISPU_MAKS = 500
 # Lampiran II.A, kategori dan status warna. (batas_atas, nama)
 ISPU_KATEGORI = [(50, "Baik"), (100, "Sedang"), (200, "Tidak Sehat"),
                  (300, "Sangat Tidak Sehat"), (10**9, "Berbahaya")]
+
+# ---------------------------------------------------------------------------
+# AQI, US EPA Air Quality Index. PEMBANDING untuk ISPU, indeks luar negeri.
+#
+# Mekanismenya sama dengan ISPU: sub-indeks tiap polutan lewat interpolasi linear
+# antar breakpoint, lalu ambil yang TERTINGGI (polutan dominan menang). Yang beda
+# tabel breakpoint dan pita indeksnya (0-50-100-150-200-300-500).
+#
+# Breakpoint EPA aslinya ppb/ppm untuk gas. Di sini SUDAH dikonversi ke ug/m3 pada
+# 25 C, 1 atm (ug/m3 = ppb x BM / 24,45) supaya sebasis dengan data kita yang ug/m3.
+# BM: O3 48, CO 28, SO2 64, NO2 46. PM2.5 memakai tabel revisi EPA 2024.
+#
+# Jendela rata-rata mengikuti EPA: PM 24 jam, O3 dan CO 8 jam, SO2 dan NO2 1 jam.
+# Data CAMS kita per jam, jadi jendela itu pas. Simpul 500 untuk O3 (di atas 8-jam
+# 0,2 ppm yang cuma sampai indeks 300) memakai padanan 1-jam 0,604 ppm. Ini
+# PEMBANDING, bukan AQI stasiun resmi; catatan itu ditulis di UI.
+# ---------------------------------------------------------------------------
+AQI_SIMPUL = [0, 50, 100, 150, 200, 300, 500]
+AQI_TABEL = {
+    "pm25": [0, 9.0,  35.4,  55.4,  125.4, 225.4, 325.4],   # EPA 2024, ug/m3, 24 jam
+    "pm10": [0, 54,   154,   254,   354,   424,   604],     # ug/m3, 24 jam
+    "o3":   [0, 106,  137,   167,   206,   393,   1186],    # 8 jam; simpul 500 dari 1 jam
+    "co":   [0, 5039, 10765, 14201, 17636, 34815, 57717],   # 8 jam
+    "so2":  [0, 91.6, 196.3, 484.3, 795.7, 1581,  2628],    # 1 jam (>200 EPA pakai 24 jam)
+    "no2":  [0, 99.7, 188.1, 677.3, 1221,  2350,  3855],    # 1 jam
+}
+# Urutan ini yang dipakai sebagai KODE polutan dominan di berkas deret titik.
+AQI_PARAM = ["pm25", "pm10", "co", "no2", "so2", "o3"]
+# Jendela rata-rata (jam) per polutan, gaya EPA. Dipakai _tulis_aqi.
+AQI_WINDOW_HOURS = {"pm25": 24, "pm10": 24, "co": 8, "o3": 8, "so2": 1, "no2": 1}
+# Di atas pita terakhir kemiringan diteruskan lalu dipotong di sini, sama seperti ISPU.
+AQI_MAKS = 500
+# Kategori resmi EPA. (batas_atas, nama). Nama Inggris karena ini indeks luar negeri.
+AQI_KATEGORI = [(50, "Good"), (100, "Moderate"), (150, "Unhealthy (Sensitif)"),
+                (200, "Unhealthy"), (300, "Very Unhealthy"), (10**9, "Hazardous")]
 
 # ---------------------------------------------------------------------------
 # DAYA DUKUNG & DAYA TAMPUNG UDARA.

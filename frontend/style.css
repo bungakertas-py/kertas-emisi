@@ -133,6 +133,15 @@ html, body {
 .layer-btn.active { background: var(--lime); color: var(--on-lime); }
 .layer-btn.active .material-symbols-outlined { color: var(--on-lime); }
 .layer-btn.disabled { opacity: .45; cursor: not-allowed; }
+/* ISPU | AQI dibelah dua dalam SATU baris tombol: hemat tempat, dua indeks
+   bisa dipilih. Kontainer memegang garis bawah, tiap separuh tanpa garis bawah
+   dan dipisah garis tegak. Separuh aktif menyala lime seperti tombol lain. */
+.layer-split { display: flex; border-bottom: var(--bw) solid var(--ink); }
+.layer-split .layer-btn--half {
+  flex: 1 1 0; justify-content: center; gap: 6px; padding: 8px 6px;
+  border-bottom: none; letter-spacing: .02em;
+}
+.layer-split .layer-btn--half + .layer-btn--half { border-left: var(--bw) solid var(--ink); }
 /* Panah geser variabel — hanya tampil di HP (lihat media query) */
 .layer-nav { display: none; }
 

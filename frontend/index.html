@@ -159,9 +159,14 @@
             </button>
             <button id="layer-prev" class="layer-nav" aria-label="Variabel sebelumnya"><span class="material-symbols-outlined">chevron_left</span></button>
             <div class="panel layers">
-              <button class="layer-btn" data-layer="ispu" data-tip="Indeks Standar Pencemar Udara, Permen LHK 14/2020">
-                <span class="material-symbols-outlined">air</span> <span class="lb-txt">ISPU</span>
-              </button>
+              <div class="layer-split">
+                <button class="layer-btn layer-btn--half" data-layer="ispu" data-tip="Indeks Standar Pencemar Udara, Permen LHK 14/2020">
+                  <span class="lb-txt">ISPU</span>
+                </button>
+                <button class="layer-btn layer-btn--half" data-layer="aqi" data-tip="US EPA Air Quality Index, pembanding ISPU">
+                  <span class="lb-txt">AQI</span>
+                </button>
+              </div>
               <button class="layer-btn" data-layer="pm25" data-tip="Partikel halus di bawah 2,5 mikron">
                 <span class="material-symbols-outlined">blur_on</span> <span class="lb-txt">PM<sub>2.5</sub></span>
               </button>
