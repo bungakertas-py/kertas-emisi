@@ -91,6 +91,9 @@ LAYERS = {
     "ispu": {"src": "turunan", "daily": False, "units": "", "level_label": "surface"},
     # AQI (US EPA), PEMBANDING ISPU. Turunan juga, dari enam parameter yang sama.
     "aqi":  {"src": "turunan", "daily": False, "units": "", "level_label": "surface"},
+    # PAPARAN penduduk: penduduk per sel (pop_grid) di sel yang ISPU-nya Tidak Sehat.
+    # Turunan dari ISPU + grid penduduk statis. Spasial, ikut waktu.
+    "paparan": {"src": "turunan", "daily": False, "units": "jiwa/sel", "level_label": "surface"},
     "pm25": {"cams_var": "particulate_matter_2.5um", "nc_var": "pm2p5", "src": "single",
              "conv": "massa", "daily": True, "units": "\u00b5g/m\u00b3", "level_label": "surface"},
     "pm10": {"cams_var": "particulate_matter_10um", "nc_var": "pm10", "src": "single",

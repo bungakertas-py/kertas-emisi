@@ -203,6 +203,11 @@ _SO2_SCALE = _skala(1, [5, 10, 50, 100, 150], _PALET["so2"])
 _O3_SCALE = _skala(1, [5, 10, 50, 100, 150], _PALET["o3"])
 # AOD 550 nm: tanpa satuan. 0,2 berkabut tipis, di atas 1 asap tebal
 _AOD_SCALE = _skala(0.05, [0.2, 0.5, 1.0, 2.0, 3.0], _PALET["aod"])
+# PAPARAN penduduk: jiwa per sel di area Tidak Sehat. Ramp UNGU, khas, beda dari
+# palet polutan. Ambang dalam jiwa/sel (sel ~44 km). Kontinu (bukan kategori).
+_PALET_PAPARAN = [(0xef, 0xe3, 0xf5), (0xc9, 0x94, 0xd4), (0xa4, 0x4c, 0xb3),
+                  (0x76, 0x1c, 0x8c), (0x40, 0x00, 0x52)]
+_PAPARAN_SCALE = _skala(5000, [50000, 200000, 500000, 1000000, 2000000], _PALET_PAPARAN)
 
 
 # Tinggi lapisan batas (PBL). Skalanya TERBALIK dari semua layer lain: yang
@@ -757,7 +762,8 @@ _SCALAR_SCALES = {
     "cin_surface": _CIN_SCALE,
     "pm25": _PM25_SCALE, "pm10": _PM10_SCALE, "co": _CO_SCALE,
     "no2": _NO2_SCALE, "so2": _SO2_SCALE, "o3": _O3_SCALE, "aod": _AOD_SCALE,
-    "ispu": _ISPU_SCALE, "aqi": _AQI_SCALE, "pbl": _PBL_SCALE, **_DT_SCALES,
+    "ispu": _ISPU_SCALE, "aqi": _AQI_SCALE, "paparan": _PAPARAN_SCALE,
+    "pbl": _PBL_SCALE, **_DT_SCALES,
 }
 
 
@@ -959,6 +965,8 @@ _PD_SCALE = {"pm25": 1.0, "pm10": 1.0, "co": 10.0, "no2": 0.1,
              "ispu": 1.0, "ispu_kritis": 1.0,
              # AQI (US EPA) juga bilangan bulat; kode dominan indeks 0..5.
              "aqi": 1.0, "aqi_kritis": 1.0,
+             # Paparan: jiwa/sel bisa jutaan. int16 x 300 -> jangkauan ~9,8 juta.
+             "paparan": 300.0,
              # PBL dalam meter, puncaknya ~3000. Muat di int16 tanpa diskalakan.
              "pbl": 1.0,
              # Daya tampung dalam ton/tahun, rentangnya lebar (ratusan ribu sampai

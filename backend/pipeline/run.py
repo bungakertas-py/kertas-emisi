@@ -320,7 +320,9 @@ def main() -> None:
     # kota yang sama, jadi titiknya disampel sekali lalu dipakai bersama.
     places_k, kota_k = _kota_arsip(kota_medan, grid, waktu_penuh)
     _tulis_peringatan(places_k, kota_k, waktu_penuh, run)
-    _tulis_paparan(places_k, kota_k, waktu_penuh, run)
+    pm_pap = _tulis_paparan(seri_i, waktu_i, run, grid, vel_nama, _muat_pop_grid(grid))
+    if pm_pap:
+        point_meta["paparan"] = pm_pap
     _tulis_arsip(places_k, kota_k, waktu_penuh, run)
 
     # Overlay titik panas VIIRS (pengamatan, bukan ramalan). Berdiri sendiri, tak
@@ -609,49 +611,68 @@ def _tulis_peringatan(places, kota, waktu_penuh, run) -> None:
     print(f"  peringatan: {len(daftar)} kota diperkirakan Tidak Sehat atau lebih")
 
 
-def _tulis_paparan(places, kota, waktu_penuh, run) -> None:
-    """Perkiraan JUMLAH PENDUDUK terpapar tiap kategori ISPU, per langkah waktu.
+def _muat_pop_grid(grid):
+    """Grid penduduk statis (jiwa/sel), SEJAJAR grid ISPU. Dibangun offline dari
+    sebaran id_pop ke sel darat CAMS (pop_grid.bin.gz, int32 gzip, baris-0 utara).
+    None kalau berkas tak ada atau dimensinya beda."""
+    import gzip
+    p = Path(__file__).resolve().parent / "pop_grid.bin.gz"
+    if not p.exists():
+        print("  pop_grid.bin.gz tak ada -> paparan dilewati")
+        return None
+    a = np.frombuffer(gzip.decompress(p.read_bytes()), dtype="<i4").astype("f8")
+    ny, nx = grid["height"], grid["width"]
+    if a.size != ny * nx:
+        print(f"  pop_grid ukuran {a.size} != {ny*nx}, dimensi grid beda -> dilewati")
+        return None
+    return a.reshape(ny, nx)
 
-    Tingkat administrasi: seluruh penduduk satu kabupaten/kota dianggap terpapar
-    ISPU di titik samplingnya. Data penduduk dari frontend/data/id_pop.json (sejajar
-    id_places, sumber Wikipedia/Kepmendagri). Ini PEMBANDING kasar, bukan sebaran
-    spasial halus; ditulis di UI. -> paparan.json (dipakai panel yang ikut slider)."""
-    a = kota.get("ispu")
-    pop_path = CITY_PLACES.parent / "id_pop.json"
-    if not places or a is None or not pop_path.exists():
-        print("  paparan dilewati: ISPU per kota atau data penduduk tak ada")
-        return
-    pdoc = json.loads(pop_path.read_text(encoding="utf-8"))
-    names = [p["n"] for p in json.loads(CITY_PLACES.read_text(encoding="utf-8"))]
-    parr = pdoc.get("pop", [])
-    nama2pop = {names[i]: parr[i] for i in range(min(len(names), len(parr)))}
+
+def _tulis_paparan(seri_ispu, waktu, run, grid, vel_nama, pop_grid):
+    """Populasi terpapar SPASIAL, dari grid ISPU x grid penduduk (pop_grid).
+
+    Per langkah: jumlah jiwa per kategori ISPU -> paparan.json (dipakai panel yang
+    ikut slider); DAN render layer 'paparan' = penduduk di sel yang ISPU-nya Tidak
+    Sehat (>100), heatmap ungu. Seluruh penduduk sel dianggap terpapar nilai ISPU
+    sel itu; grid ~44 km, jadi PEMBANDING kasar tingkat sel, bukan paparan individu.
+    Catatan ditulis di UI."""
+    if pop_grid is None or not seri_ispu:
+        print("  paparan dilewati: pop_grid / ISPU per grid tak ada")
+        return None
     kat = [n for _, n in C.ISPU_KATEGORI]                 # Baik..Berbahaya
-    nt = a.shape[1]
+    batas = [b for b, _ in C.ISPU_KATEGORI]
+    nt = len(seri_ispu)
     jiwa = [[0] * len(kat) for _ in range(nt)]
-    total_jiwa, total_kota = 0, 0
-    for i in range(a.shape[0]):
-        pop = nama2pop.get(places[i]["n"])
-        if not pop:
-            continue
-        total_jiwa += pop
-        total_kota += 1
-        seri = a[i]
-        for t in range(nt):
-            v = seri[t]
-            if not np.isfinite(v):
-                continue
-            k = next((j for j, (batas, _) in enumerate(C.ISPU_KATEGORI) if v <= batas),
-                     len(kat) - 1)
-            jiwa[t][k] += int(pop)
+    expo_seri = []
+    for t in range(nt):
+        ispu = seri_ispu[t]
+        fin = np.isfinite(ispu)
+        lo = -1.0
+        for c, b in enumerate(batas):
+            m = fin & (ispu > lo) & (ispu <= b)
+            jiwa[t][c] = int(np.nansum(pop_grid[m]))
+            lo = b
+        # Layer heatmap: penduduk di sel Tidak Sehat+ (ISPU>100), sisanya bening (NaN).
+        expo = np.where(fin & (ispu > 100), pop_grid.astype("f4"), np.nan)
+        expo_seri.append(expo)
+        valid = _parse(waktu[t])
+        fstep = int((valid - run).total_seconds() // 3600)
+        write_scalar_frame(expo, grid, "paparan", run, valid, "jiwa/sel", f"f{fstep:03d}",
+                           extra={"model": "CAMS", "velocity_json": vel_nama.get(fstep)})
+    # Deret titik: penduduk terpapar di sel yang diklik, sepanjang waktu (0 saat aman).
+    pm = write_point_series("paparan", expo_seri, waktu, grid)
+    pm.update({"units": "jiwa/sel", "daily": False})
+    total = int(np.nansum(pop_grid))
     doc = {"generated": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
            "run": run.strftime("%Y-%m-%dT%H:00:00Z"), "indeks": "ISPU",
-           "sumber": pdoc.get("_meta", {}).get("sumber", ""),
-           "jiwa_terdata": total_jiwa, "kota_terdata": total_kota,
-           "kategori": kat, "times": waktu_penuh, "jiwa": jiwa}
+           "sumber": "grid penduduk ~44 km (sebaran kabupaten/kota, Kepmendagri 2025)",
+           "jiwa_terdata": total, "kategori": kat, "times": waktu, "jiwa": jiwa}
     (OUTPUT_DIR / "paparan.json").write_text(json.dumps(doc, separators=(",", ":")),
                                              encoding="utf-8")
-    print(f"  paparan: {total_kota} kota terdata, {total_jiwa/1e6:.1f} juta jiwa, "
-          f"{nt} langkah")
+    buruk = max((sum(r[2:]) for r in jiwa), default=0)
+    print(f"  paparan: grid {total/1e6:.1f} juta jiwa, puncak Tidak Sehat+ "
+          f"{buruk/1e6:.1f} juta, layer {nt} frame")
+    return pm
 
 
 # Pembulatan per parameter di arsip: indeks & CO bilangan bulat, PM & O3 satu

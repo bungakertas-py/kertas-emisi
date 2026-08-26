@@ -73,6 +73,10 @@ const LEGENDS = {
   aqi:  { head: "AQI", words: 1,
           cells: AQI_KAT.map(([, nama, warna, putih], i) =>
             [nama, warna, putih, AQI_RENTANG[i]]) },
+  // Paparan penduduk: jiwa/sel di area Tidak Sehat, ramp ungu (cermin _PALET_PAPARAN).
+  paparan: { head: "jiwa/sel", lebar: 1,
+             cells: [["50 rb", "#efe3f5", 0], ["200 rb", "#c994d4", 0],
+                     ["500 rb", "#a44cb3", 1], ["1 jt", "#761c8c", 1], ["2 jt", "#400052", 1]] },
   pm25: _leg("pm25", UG, [15, 20, 35, 40, 55]),
   pm10: _leg("pm10", UG, [20, 35, 40, 60, 75]),
   co:   _leg("co", UG, [500, 1000, 2000, 4000, 8000, 10000]),
@@ -187,14 +191,14 @@ function mintaSandiDT() {
 // Rumus kimia ditulis dengan angka turun. Dua bentuk: <sub> untuk tempat yang
 // menerima HTML, karakter Unicode untuk atribut & teks polos (tooltip, judul, share).
 const KIMIA_HTML = {
-  ispu: "ISPU", aqi: "AQI", pm25: "PM<sub>2.5</sub>", pm10: "PM<sub>10</sub>", co: "CO",
+  ispu: "ISPU", aqi: "AQI", paparan: "Paparan Penduduk", pm25: "PM<sub>2.5</sub>", pm10: "PM<sub>10</sub>", co: "CO",
   no2: "NO<sub>2</sub>", so2: "SO<sub>2</sub>", o3: "O<sub>3</sub>", aod: "Kabut Asap",
   pbl: "PBLH",
   dt_pm25: "Daya Tampung PM<sub>2.5</sub>", dt_pm10: "Daya Tampung PM<sub>10</sub>",
   dt_so2: "Daya Tampung SO<sub>2</sub>", dt_no2: "Daya Tampung NO<sub>2</sub>",
 };
 const KIMIA_TEKS = {
-  ispu: "ISPU", aqi: "AQI", pm25: "PM\u2082.\u2085", pm10: "PM\u2081\u2080", co: "CO",
+  ispu: "ISPU", aqi: "AQI", paparan: "Paparan Penduduk", pm25: "PM\u2082.\u2085", pm10: "PM\u2081\u2080", co: "CO",
   no2: "NO\u2082", so2: "SO\u2082", o3: "O\u2083", aod: "Kabut Asap",
   pbl: "PBLH",
   dt_pm25: "Daya Tampung PM\u2082.\u2085", dt_pm10: "Daya Tampung PM\u2081\u2080",
@@ -213,7 +217,7 @@ const LAYER_THEME = {
   // sekali; sel yang nyaris pas di ambang justru akan tampak seperti lubang.
   ispu: "light", aqi: "light", o3: "light", aod: "light",
   dt_pm25: "dark", dt_pm10: "dark", dt_so2: "dark", dt_no2: "dark",
-  pm25: "dark", pm10: "dark", co: "dark", no2: "dark", so2: "dark", pbl: "dark",
+  pm25: "dark", pm10: "dark", co: "dark", no2: "dark", so2: "dark", pbl: "dark", paparan: "dark",
   wind_surface: "dark", rain_surface: "dark", rain_accum_surface: "dark",
   temp_surface: "dark", humidity_surface: "dark", cloud_surface: "dark", pressure_surface: "dark",
   storm_potential: "dark", cin_surface: "dark", wind_strato: "dark", temp_strato: "dark",
@@ -667,6 +671,7 @@ function setActiveLayer(layerKey) {
   frames = catalog.layers[layerKey].frames;
   document.querySelectorAll(".layer-btn[data-layer]").forEach((b) =>
     b.classList.toggle("active", b.dataset.layer === activeBase));
+  $("paparan-btn")?.classList.toggle("active", activeBase === "paparan");   // tombolnya di kontrol kanan
   renderLegend(layerKey);
   applyTheme();
   if (velocityLayer) { map.removeLayer(velocityLayer); velocityLayer = null; } // recreate warna partikel
@@ -1545,10 +1550,10 @@ function paparanHTML() {
     `Populasi terpapar (ISPU)</div>` +
     `<div class="info-big"><b>${buruk > 0 ? fmtJuta(buruk) : "0"}</b>` +
     `<span>jiwa, udara Tidak Sehat atau lebih buruk</span></div>` +
-    `<div class="per-lead">Perkiraan penduduk kabupaten/kota pada tiap kategori ISPU untuk waktu yang ` +
-    `tampil (${fmtKapan(vt)}). Seluruh penduduk satu wilayah dianggap seperti nilai ISPU di titiknya, ` +
-    `jadi PEMBANDING kasar tingkat administrasi, bukan sebaran spasial halus. Data ` +
-    `${paparanDoc.kota_terdata} wilayah, ~${fmtJuta(paparanDoc.jiwa_terdata)} jiwa. Sumber: ${paparanDoc.sumber}.</div>` +
+    `<div class="per-lead">Perkiraan penduduk per sel grid (~44 km) pada tiap kategori ISPU untuk ` +
+    `waktu yang tampil (${fmtKapan(vt)}). Seluruh penduduk sel dianggap seperti nilai ISPU sel itu, ` +
+    `jadi PEMBANDING kasar tingkat sel. Total terdata ~${fmtJuta(paparanDoc.jiwa_terdata)} jiwa. ` +
+    `Buka layer <b>Paparan Penduduk</b> untuk peta spasialnya. Sumber: ${paparanDoc.sumber}.</div>` +
     `<div class="per-list">${rows}</div></div>`;
 }
 function renderInfoHTML() {
@@ -2804,6 +2809,12 @@ async function init() {
       btn.classList.toggle("active", key === activeLayer);
     });
     renderLegend(activeLayer);
+    // Tombol Paparan ada di KONTROL KANAN (bukan bilah layer), tapi memilih layer 'paparan'.
+    const _pb = $("paparan-btn");
+    if (_pb) {
+      _pb.classList.toggle("disabled", !cat.layers.paparan);
+      _pb.classList.toggle("active", activeLayer === "paparan");
+    }
 
     // Medan angin per-waktu — partikel dipakai di SEMUA layer (termasuk hujan).
     // Kertas Emisi tak punya layer angin sendiri. Velocity ditempelkan ke tiap frame
@@ -2974,6 +2985,14 @@ async function init() {
     $("info-toggle")?.addEventListener("click", () => {
       if (infoOpen()) { tutupSidebar(); }
       else openInfo();
+    });
+    // Tombol Paparan (kontrol kanan) -> pilih layer 'paparan', seperti tombol bilah layer.
+    $("paparan-btn")?.addEventListener("click", () => {
+      const b = $("paparan-btn");
+      if (!b || b.classList.contains("disabled")) return;
+      if (playing) togglePlay();
+      activeBase = "paparan";
+      setActiveLayer(resolveLayer("paparan"));
     });
 
     // Pencarian kota/kabupaten
