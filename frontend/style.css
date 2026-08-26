@@ -667,6 +667,25 @@ html, body {
   font-family: var(--font-ui); font-size: 11px; font-weight: 700; line-height: 1.2;
 }
 .cyc-note-top .material-symbols-outlined { font-size: 16px; flex: none; }
+/* Panel KUALITAS UDARA (di sidebar #point-panel): bagian peringatan + populasi,
+   masing-masing dengan header. Isi memakai kelas .per-* yang sudah ada. */
+.info-sec { margin-bottom: 16px; }
+.info-sec:last-child { margin-bottom: 0; }
+.info-sec-h { display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
+  padding-bottom: 6px; border-bottom: 2px solid var(--ink);
+  font-family: var(--font-ui); font-size: 13px; font-weight: 700; color: var(--ink); }
+.info-sec-h .material-symbols-outlined { font-size: 18px; color: var(--primary); }
+.info-big { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px;
+  margin-bottom: 10px; background: var(--primary); color: #fff; }
+.info-big b { font-size: 26px; line-height: 1; font-family: var(--font-ui); }
+.info-big span { font-size: 11px; }
+/* Titik merah kecil di tombol Kualitas Udara saat ada peringatan kota.
+   Pakai ::before, karena ::after sudah dipakai tooltip data-tip (satu elemen
+   cuma boleh punya satu ::after; kalau ditumpuk, tooltipnya rusak saat hover). */
+.icon-btn.has-alert { position: relative; }
+.icon-btn.has-alert::before { content: ""; position: absolute; top: 4px; right: 4px;
+  z-index: 2; width: 8px; height: 8px; border-radius: 50%; background: #e8342c;
+  border: 1.5px solid var(--surface); }
 /* Tab putih menonjol di bawah-tengah kontainer. z-index -1 → muncul DARI DALAM
    banner (bagian atasnya ketutup kontainer), jadi batas putihnya mulus/tak terlihat. */
 .cyc-tab {

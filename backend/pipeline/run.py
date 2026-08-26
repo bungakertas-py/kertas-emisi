@@ -20,9 +20,9 @@ import config as C
 from config import KEEP_PAST_HOURS, LAYERS, OUTPUT_DIR
 import cams
 import firms
-from process import (_export_velocity_json, hitung_aqi, hitung_daya_tampung,
-                     hitung_ispu, luas_sel, sampel_kota, write_city_data,
-                     write_point_series, write_scalar_frame)
+from process import (CITY_PLACES, _export_velocity_json, hitung_aqi,
+                     hitung_daya_tampung, hitung_ispu, luas_sel, sampel_kota,
+                     write_city_data, write_point_series, write_scalar_frame)
 
 # Parameter yang diarsipkan tiap hari: tujuh polutan + ISPU. Format berkas harian
 # ini SUSAH diubah setelah riwayat menumpuk, jadi daftar dan urutannya dipatok.
@@ -320,6 +320,7 @@ def main() -> None:
     # kota yang sama, jadi titiknya disampel sekali lalu dipakai bersama.
     places_k, kota_k = _kota_arsip(kota_medan, grid, waktu_penuh)
     _tulis_peringatan(places_k, kota_k, waktu_penuh, run)
+    _tulis_paparan(places_k, kota_k, waktu_penuh, run)
     _tulis_arsip(places_k, kota_k, waktu_penuh, run)
 
     # Overlay titik panas VIIRS (pengamatan, bukan ramalan). Berdiri sendiri, tak
@@ -606,6 +607,51 @@ def _tulis_peringatan(places, kota, waktu_penuh, run) -> None:
     (OUTPUT_DIR / "peringatan.json").write_text(json.dumps(doc, separators=(",", ":")),
                                                 encoding="utf-8")
     print(f"  peringatan: {len(daftar)} kota diperkirakan Tidak Sehat atau lebih")
+
+
+def _tulis_paparan(places, kota, waktu_penuh, run) -> None:
+    """Perkiraan JUMLAH PENDUDUK terpapar tiap kategori ISPU, per langkah waktu.
+
+    Tingkat administrasi: seluruh penduduk satu kabupaten/kota dianggap terpapar
+    ISPU di titik samplingnya. Data penduduk dari frontend/data/id_pop.json (sejajar
+    id_places, sumber Wikipedia/Kepmendagri). Ini PEMBANDING kasar, bukan sebaran
+    spasial halus; ditulis di UI. -> paparan.json (dipakai panel yang ikut slider)."""
+    a = kota.get("ispu")
+    pop_path = CITY_PLACES.parent / "id_pop.json"
+    if not places or a is None or not pop_path.exists():
+        print("  paparan dilewati: ISPU per kota atau data penduduk tak ada")
+        return
+    pdoc = json.loads(pop_path.read_text(encoding="utf-8"))
+    names = [p["n"] for p in json.loads(CITY_PLACES.read_text(encoding="utf-8"))]
+    parr = pdoc.get("pop", [])
+    nama2pop = {names[i]: parr[i] for i in range(min(len(names), len(parr)))}
+    kat = [n for _, n in C.ISPU_KATEGORI]                 # Baik..Berbahaya
+    nt = a.shape[1]
+    jiwa = [[0] * len(kat) for _ in range(nt)]
+    total_jiwa, total_kota = 0, 0
+    for i in range(a.shape[0]):
+        pop = nama2pop.get(places[i]["n"])
+        if not pop:
+            continue
+        total_jiwa += pop
+        total_kota += 1
+        seri = a[i]
+        for t in range(nt):
+            v = seri[t]
+            if not np.isfinite(v):
+                continue
+            k = next((j for j, (batas, _) in enumerate(C.ISPU_KATEGORI) if v <= batas),
+                     len(kat) - 1)
+            jiwa[t][k] += int(pop)
+    doc = {"generated": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+           "run": run.strftime("%Y-%m-%dT%H:00:00Z"), "indeks": "ISPU",
+           "sumber": pdoc.get("_meta", {}).get("sumber", ""),
+           "jiwa_terdata": total_jiwa, "kota_terdata": total_kota,
+           "kategori": kat, "times": waktu_penuh, "jiwa": jiwa}
+    (OUTPUT_DIR / "paparan.json").write_text(json.dumps(doc, separators=(",", ":")),
+                                             encoding="utf-8")
+    print(f"  paparan: {total_kota} kota terdata, {total_jiwa/1e6:.1f} juta jiwa, "
+          f"{nt} langkah")
 
 
 # Pembulatan per parameter di arsip: indeks & CO bilangan bulat, PM & O3 satu

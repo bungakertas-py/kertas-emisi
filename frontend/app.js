@@ -543,6 +543,7 @@ function applyTheme() {
 
 // Warna partikel angin sesuai tema: gelap di latar terang, putih di latar gelap.
 function particleColor() {
+  if (activeLayer === "o3") return "#ffffff";   // O3: partikel angin PUTIH (permintaan user)
   return LAYER_THEME[activeLayer] === "light" ? "#2b3550" : "#ffffff";
 }
 
@@ -739,6 +740,7 @@ async function showFrame(i) {
   if (vt) vt.textContent = DAILY_LAYERS.has(activeLayer) ? fmtDay(frame.valid_time) : fmtValid(frame.valid_time);
   const ts = $("time-slider"); if (ts) ts.value = String(current);
   refreshCityIcons();                    // label kota (+ikon bila aktif) ikut waktu aktif
+  refreshInfoIfOpen();                   // panel Kualitas Udara ikut waktu aktif (jika terbuka)
   if (cyclonesOn) refreshCyclones();     // siklon + jalur ikut waktu aktif
   if (itczOn) refreshItcz();             // zona ITCZ ikut waktu aktif
   if (activeLayer === "pressure_surface") refreshIsobars();   // isobar ikut waktu aktif
@@ -1484,7 +1486,102 @@ async function loadPeringatan() {
     const r = await fetch(DATA_BASE + "peringatan.json");
     peringatanData = r.ok ? await r.json() : null;
   } catch (e) { peringatanData = null; }
-  isiPeringatan();
+  refreshInfoIfOpen();
+  markInfoAlert();
+}
+
+// ---- Populasi terpapar (paparan.json) ----------------------------------
+// Perkiraan jumlah penduduk pada tiap kategori ISPU untuk waktu yang sedang
+// tampil. Hanya muncul saat layer ISPU aktif (indeksnya memang ISPU).
+let paparanDoc = null;
+async function loadPaparan() {
+  try {
+    const r = await fetch(DATA_BASE + "paparan.json");
+    paparanDoc = r.ok ? await r.json() : null;
+  } catch (e) { paparanDoc = null; }
+  refreshInfoIfOpen();
+}
+function fmtJuta(n) {
+  n = Math.round(n || 0);
+  if (n >= 1e6) return (n / 1e6).toLocaleString("id-ID", { maximumFractionDigits: 1 }) + " juta";
+  if (n >= 1e3) return (n / 1e3).toLocaleString("id-ID", { maximumFractionDigits: 0 }) + " ribu";
+  return n.toLocaleString("id-ID");
+}
+
+// ---- Panel KUALITAS UDARA (sidebar kanan) ------------------------------
+// Gabungan peringatan kota + populasi terpapar dalam SATU sidebar, dibuka lewat
+// tombol "Kualitas Udara". Isi populasi terpapar ikut slider waktu.
+let sidebarMode = null;   // "point" | "info" | null
+function peringatanHTML() {
+  const kota = (peringatanData && peringatanData.kota) || [];
+  if (!kota.length) return "";
+  const rows = kota.map((k) => {
+    const bg = ispuKategori(k.puncak)[2];
+    return `<div class="per-row" data-lat="${k.lat}" data-lon="${k.lon}" data-nama="${escAttr(k.n)}">` +
+           `<span class="per-dot" style="background:${bg}"></span>` +
+           `<span class="per-nama">${k.n}</span>` +
+           `<span class="per-nilai">${k.puncak}</span>` +
+           `<span class="per-kapan">${fmtKapan(k.mulai)}</span></div>`;
+  }).join("");
+  return `<div class="info-sec"><div class="info-sec-h"><span class="material-symbols-outlined">warning</span>` +
+    `${kota.length} kota diperkirakan Tidak Sehat atau lebih</div>` +
+    `<div class="per-lead">Kota yang diramalkan menembus ISPU 100 (Tidak Sehat) dalam 5 hari ke depan. ` +
+    `Indikasi model CAMS, bukan pengumuman resmi. Klik untuk menuju kotanya.</div>` +
+    `<div class="per-list">${rows}</div></div>`;
+}
+function paparanHTML() {
+  if (!paparanDoc) return "";
+  const vt = frames[current] && frames[current].valid_time;
+  let i = nearestIndex(paparanDoc.times, vt); if (i < 0) i = 0;
+  const j = paparanDoc.jiwa[i] || [0, 0, 0, 0, 0];
+  const buruk = (j[2] || 0) + (j[3] || 0) + (j[4] || 0);   // Tidak Sehat + lebih buruk
+  const rows = (paparanDoc.kategori || []).map((nama, k) => {
+    const col = (ISPU_KAT[k] && ISPU_KAT[k][2]) || "#999";
+    return `<div class="per-row"><span class="per-dot" style="background:${col}"></span>` +
+           `<span class="per-nama">${nama}</span>` +
+           `<span class="per-nilai">${fmtJuta(j[k] || 0)}</span></div>`;
+  }).join("");
+  return `<div class="info-sec"><div class="info-sec-h"><span class="material-symbols-outlined">groups</span>` +
+    `Populasi terpapar (ISPU)</div>` +
+    `<div class="info-big"><b>${buruk > 0 ? fmtJuta(buruk) : "0"}</b>` +
+    `<span>jiwa, udara Tidak Sehat atau lebih buruk</span></div>` +
+    `<div class="per-lead">Perkiraan penduduk kabupaten/kota pada tiap kategori ISPU untuk waktu yang ` +
+    `tampil (${fmtKapan(vt)}). Seluruh penduduk satu wilayah dianggap seperti nilai ISPU di titiknya, ` +
+    `jadi PEMBANDING kasar tingkat administrasi, bukan sebaran spasial halus. Data ` +
+    `${paparanDoc.kota_terdata} wilayah, ~${fmtJuta(paparanDoc.jiwa_terdata)} jiwa. Sumber: ${paparanDoc.sumber}.</div>` +
+    `<div class="per-list">${rows}</div></div>`;
+}
+function renderInfoHTML() {
+  return (peringatanHTML() + paparanHTML()) || '<div class="pt-loading">Belum ada data kualitas udara.</div>';
+}
+function infoOpen() { return sidebarMode === "info" && !!$("point-panel")?.classList.contains("open"); }
+function wireInfoRows() {
+  document.querySelectorAll("#pt-body .per-row[data-lat]").forEach((row) => {
+    row.addEventListener("click", () => {
+      const la = parseFloat(row.dataset.lat), lo = parseFloat(row.dataset.lon);
+      map.setView([la, lo], 8, { animate: true });
+      openPoint(la, lo, row.dataset.nama);
+    });
+  });
+}
+function refreshInfoIfOpen() { if (infoOpen()) { isiSidebar(renderInfoHTML()); wireInfoRows(); } }
+function syncInfoToggle() { $("info-toggle")?.classList.toggle("active", infoOpen()); }
+function markInfoAlert() {
+  const ada = !!(peringatanData && peringatanData.kota && peringatanData.kota.length);
+  $("info-toggle")?.classList.toggle("has-alert", ada);
+}
+function openInfo() {
+  const pp = $("point-panel"); if (!pp) return;
+  sidebarMode = "info";
+  const t = $("pt-par"); if (t) t.innerHTML = "Kualitas Udara";
+  setPointLabel("Peringatan & populasi terpapar", "addr");
+  isiSidebar(renderInfoHTML());
+  wireInfoRows();
+  pp.classList.add("open");
+  pp.classList.toggle("hidden", sidebarTersembunyi);
+  $("pt-reopen")?.classList.toggle("show", sidebarTersembunyi);
+  geserUI();
+  syncInfoToggle();
 }
 
 function fmtKapan(iso) {
@@ -1494,37 +1591,6 @@ function fmtKapan(iso) {
   return `${hari} ${String(w.getUTCHours()).padStart(2, "0")}:00`;
 }
 const escAttr = (s) => String(s).replace(/"/g, "&quot;");
-
-function isiPeringatan() {
-  const box = $("peringatan-note");
-  if (!box) return;
-  const kota = (peringatanData && peringatanData.kota) || [];
-  if (!kota.length) { box.classList.remove("show", "open"); return; }
-  const ring = $("peringatan-ringkas");
-  if (ring) ring.textContent = `${kota.length} kota diperkirakan Tidak Sehat atau lebih`;
-  const det = $("peringatan-detail");
-  if (det) {
-    const lead = '<div class="per-lead">Kota yang diramalkan menembus ISPU 100 (Tidak Sehat) ' +
-      'dalam 5 hari ke depan. Indikasi model CAMS, bukan pengumuman resmi. Klik untuk menuju kotanya.</div>';
-    const rows = kota.map((k) => {
-      const bg = ispuKategori(k.puncak)[2];
-      return `<div class="per-row" data-lat="${k.lat}" data-lon="${k.lon}" data-nama="${escAttr(k.n)}">` +
-             `<span class="per-dot" style="background:${bg}"></span>` +
-             `<span class="per-nama">${k.n}</span>` +
-             `<span class="per-nilai">${k.puncak}</span>` +
-             `<span class="per-kapan">${fmtKapan(k.mulai)}</span></div>`;
-    }).join("");
-    det.innerHTML = lead + `<div class="per-list">${rows}</div>`;
-    det.querySelectorAll(".per-row").forEach((row) => {
-      row.addEventListener("click", () => {
-        const la = parseFloat(row.dataset.lat), lo = parseFloat(row.dataset.lon);
-        map.setView([la, lo], 8, { animate: true });
-        openPoint(la, lo, row.dataset.nama);
-      });
-    });
-  }
-  box.classList.add("show");
-}
 
 function nearestIndex(times, vt) {
   if (!vt || !times || !times.length) return -1;
@@ -1550,12 +1616,14 @@ function sidebarAktif() { return !!$("point-panel")?.classList.contains("open");
 function bukaSidebar(judul, par, koordinat) {
   const pp = $("point-panel");
   if (!pp) return;
+  sidebarMode = "point";                 // isi titik, bukan panel Kualitas Udara
   setPointLabel(judul, koordinat ? "coord" : "addr");
   const t = $("pt-par"); if (t) t.innerHTML = par || "";
   pp.classList.add("open");
   pp.classList.toggle("hidden", sidebarTersembunyi);
   $("pt-reopen")?.classList.toggle("show", sidebarTersembunyi);
   geserUI();
+  syncInfoToggle();
 }
 
 // Panel memakan 380 px tepi kanan peta. Kontrol kanan, legenda, dan slider ikut
@@ -1571,7 +1639,9 @@ function isiSidebar(html) { const b = $("pt-body"); if (b) b.innerHTML = html; }
 function tutupSidebar() {
   $("point-panel")?.classList.remove("open", "hidden");
   $("pt-reopen")?.classList.remove("show");
+  sidebarMode = null;
   geserUI();
+  syncInfoToggle();
 }
 
 // Popup duduk persis di titiknya jadi tak perlu penanda. Sidebar tidak, jadi
@@ -2743,6 +2813,7 @@ async function init() {
 
     setupLevelSelect();   // hidupkan dropdown LEVEL kalau data strato ada
     if (!dataMissing) loadPeringatan();   // banner peringatan kualitas udara
+    if (!dataMissing) loadPaparan();      // banner populasi terpapar (layer ISPU)
 
     // Bingkai tampilan = kotak inti (VIEW_CORE) yang diperlebar pada sumbu yang
     // perlu hingga RASIONYA sama dengan jendela desktop. Efeknya: seluruh wilayah
@@ -2899,7 +2970,11 @@ async function init() {
     // Dropdown legenda+threshold di banner indikasi siklon.
     $("cyc-note-toggle")?.addEventListener("click", () => $("cyc-note").classList.toggle("open"));
     $("itcz-note-toggle")?.addEventListener("click", () => $("itcz-note").classList.toggle("open"));
-    $("peringatan-toggle")?.addEventListener("click", () => $("peringatan-note").classList.toggle("open"));
+    // Tombol "Kualitas Udara" -> buka/tutup sidebar berisi peringatan + populasi terpapar.
+    $("info-toggle")?.addEventListener("click", () => {
+      if (infoOpen()) { tutupSidebar(); }
+      else openInfo();
+    });
 
     // Pencarian kota/kabupaten
     const sbox = $("search-box"), sin = $("search-input");

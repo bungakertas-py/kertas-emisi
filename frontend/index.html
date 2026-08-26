@@ -119,19 +119,6 @@
             </button>
           </div>
 
-          <!-- Banner PERINGATAN: kota yang diramalkan tembus Tidak Sehat (ISPU>100)
-               dalam 5 hari ke depan. Diisi & ditampilkan oleh app.js dari peringatan.json. -->
-          <div id="peringatan-note" class="cyc-note peringatan-note">
-            <div class="cyc-note-top">
-              <span class="material-symbols-outlined">warning</span>
-              <span class="cyc-note-txt" id="peringatan-ringkas">Peringatan kualitas udara</span>
-            </div>
-            <div class="cyc-detail" id="peringatan-detail"></div>
-            <button type="button" class="cyc-tab" id="peringatan-toggle" aria-label="Tampilkan daftar kota">
-              <span class="material-symbols-outlined cyc-caret">expand_more</span>
-            </button>
-          </div>
-
           <!-- Banner TITIK API: hotspot VIIRS 48 jam terakhir (pengamatan satelit).
                Muncul saat toggle Titik Api aktif. Diisi app.js dari titik_api.json. -->
           <div id="api-note" class="cyc-note api-note">
@@ -269,6 +256,7 @@
           <button id="cyclone-toggle" class="icon-btn" aria-label="Deteksi siklon + jalur prakiraan" data-tip="Siklon"><span class="material-symbols-outlined">cyclone</span></button>
           <button id="itcz-toggle" class="icon-btn" aria-label="Zona pertemuan angin (ITCZ)" data-tip="ITCZ"><span class="material-symbols-outlined">looks</span></button>
           <button id="api-toggle" class="icon-btn" aria-label="Titik panas satelit VIIRS (FIRMS)" data-tip="Titik Api"><span class="material-symbols-outlined">local_fire_department</span></button>
+          <button id="info-toggle" class="icon-btn" aria-label="Kualitas udara: peringatan &amp; populasi terpapar" data-tip="Kualitas Udara"><span class="material-symbols-outlined">groups</span></button>
           <div class="phenom-wrap">
             <button id="mon-toggle" class="icon-btn" aria-label="Fenomena atmosfer" data-tip="Fenomena"><span class="material-symbols-outlined">explore</span></button>
             <div id="phenom-panel" class="phenom-panel"></div>
