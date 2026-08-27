@@ -1246,7 +1246,7 @@ function desimalLangkah(l) {
   return 4;
 }
 
-function seriesPlotSVG(vals, times, unit, daily, warna, pita, baku) {
+function seriesPlotSVG(vals, times, unit, daily, warna, pita, baku, namaY) {
   const n = vals.length;
   if (!n) return "";
   // padL sengaja ketat. Yang menentukan lebarnya cuma label terpanjang ("12.000")
@@ -1301,9 +1301,9 @@ function seriesPlotSVG(vals, times, unit, daily, warna, pita, baku) {
     sy += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W - padR}" y2="${y.toFixed(1)}" class="pp-grid"/>` +
           `<text x="${padL - 4}" y="${(y + 3).toFixed(1)}" class="pp-ytick">${angkaID(v)}</text>`;
   }
-  // Satuan sumbu Y, diputar 90 derajat di tepi kiri. ISPU tak bersatuan, jadi nama
-  // indeksnya sendiri yang dipakai supaya sumbunya tetap punya keterangan.
-  const satuanY = unit || (pita ? "ISPU" : "");
+  // Satuan sumbu Y, diputar 90 derajat di tepi kiri. ISPU/AQI tak bersatuan, jadi
+  // nama indeksnya (dari namaY) yang dipakai supaya sumbunya tetap punya keterangan.
+  const satuanY = unit || namaY || (pita ? "ISPU" : "");
   const cy = (padT + ph / 2).toFixed(1);
   const yu = satuanY
     ? `<text transform="rotate(-90 7 ${cy})" x="7" y="${cy}" class="pp-yunit">${satuanY}</text>` : "";
@@ -1750,9 +1750,12 @@ async function badanTitik(key, lat, lon) {
   // AOD memang tak bersatuan, tapi sumbu tanpa keterangan sama sekali bikin
   // bingung. Nama besarannya sendiri yang dipakai.
   const satuan = pd.meta.units || (key === "aod" ? "AOD" : "");
+  // Label sumbu Y untuk indeks tak bersatuan: ikut layer aktif (ISPU vs AQI),
+  // supaya AQI tak salah berlabel "ISPU".
+  const namaY = key === "aqi" ? "AQI" : key === "ispu" ? "ISPU" : "";
   return {
     par: KIMIA_HTML[key] || key,
-    badan: kepala + seriesPlotSVG(vals, pd.meta.times, satuan, pd.meta.daily, warna, pita, baku),
+    badan: kepala + seriesPlotSVG(vals, pd.meta.times, satuan, pd.meta.daily, warna, pita, baku, namaY),
   };
 }
 
