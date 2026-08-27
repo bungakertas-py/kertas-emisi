@@ -344,18 +344,18 @@ const VIEW_CORE = L.latLngBounds([-28, 68], [28, 174]);
 // "labels"; kalau alasnya juga membawa nama, namanya muncul dua kali di tempat yang
 // datanya transparan (mis. hujan saat kering).
 const _alasOpts = {
-  // Sumber datanya CAMS, bukan GFS. Kertas Emisi mewarisi frontend Kertas Cuaca,
-  // dan atribusi ini ikut terbawa sebelum sempat dibetulkan.
-  attribution: '&copy; OpenStreetMap &copy; CARTO | Data: CAMS (Copernicus/ECMWF)',
-  subdomains: "abcd",
-  maxZoom: 12,
+  // Basemap Esri World Gray Canvas (GRATIS, tanpa API key). CARTO menghentikan
+  // akses tanpa-key (tile bertempel watermark "API key required"), jadi pindah
+  // ke Esri. Tanpa subdomain/{r}; nativenya sampai zoom 16.
+  attribution: 'Tiles &copy; Esri | Data: CAMS (Copernicus/ECMWF)',
+  maxZoom: 12, maxNativeZoom: 16,
   updateWhenZooming: false, // tunda muat tile sampai zoom selesai → animasi mulus
   keepBuffer: 4,
 };
 // Dua alas. Gelap untuk enam layer polutan, terang khusus ISPU yang kategori
 // tertingginya berwarna hitam. Ditukar oleh applyTheme().
-const darkBase = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png", _alasOpts).addTo(map);
-const lightBase = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png", _alasOpts);
+const darkBase = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", _alasOpts).addTo(map);
+const lightBase = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}", _alasOpts);
 
 // Pane heatmap kecepatan angin: di atas peta dasar (z200), di bawah partikel
 // (overlayPane z400) & label (z650). Ini "kontur warna" ala BMKG Signature.
@@ -396,9 +396,9 @@ const firePane = map.createPane("fire");
 firePane.style.zIndex = 658;
 // Dua set label: GELAP (teks terang, utk tema gelap/angin) & TERANG (teks gelap,
 // utk tema terang/hujan). Ditukar oleh applyTheme() sesuai layer aktif.
-const _lblOpts = { subdomains: "abcd", pane: "labels", updateWhenZooming: false, keepBuffer: 4 };
-const darkLabels = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png", _lblOpts).addTo(map);
-const lightLabels = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png", _lblOpts);
+const _lblOpts = { pane: "labels", maxNativeZoom: 16, updateWhenZooming: false, keepBuffer: 4 };
+const darkLabels = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}", _lblOpts).addTo(map);
+const lightLabels = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}", _lblOpts);
 
 // ---- State -------------------------------------------------------------
 let frames = [];

@@ -1,7 +1,7 @@
 /* Service worker Kertas Emisi — cache SHELL app (berversi), data cuaca TETAP
  * online. Naikkan VERSION tiap rilis frontend agar user dapat versi terbaru
  * (cache lama dihapus saat activate). */
-const VERSION = "v10";
+const VERSION = "v11";
 const CACHE = "kertas-emisi-" + VERSION;
 
 // Saat REVIEW LOKAL, jangan cache shell sama sekali. Strategi cache-first membuat
