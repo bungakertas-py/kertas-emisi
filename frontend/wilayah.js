@@ -494,6 +494,44 @@
     setHasil(""); setStatus("");
   }
 
+  // ---- Pamflet penjelasan (gambar UI aplikasi asli + langkah) ----
+  function bangunPamflet() {
+    var step = function (n, t, d) { return '<div class="dtw-s"><span class="n">' + n + '</span><div><p class="dtw-s-t">' + t + '</p><p class="dtw-s-d">' + d + '</p></div></div>'; };
+    var m = document.createElement("div"); m.id = "dtw-pamflet"; m.className = "dtw-modal";
+    m.innerHTML =
+      '<div class="dtw-card">' +
+      '<div class="dtw-p-head">' +
+      '<div class="dtw-p-eyebrow">Fitur baru</div>' +
+      '<h2 class="dtw-p-title">Berapa banyak lagi udara wilayahmu sanggup menampung?</h2>' +
+      '<p class="dtw-p-sub">Hitung daya tampung udara (Permen LH No. 5) khusus untuk batas wilayah studimu, langsung di peta.</p>' +
+      '<button class="dtw-p-x" aria-label="Tutup">×</button>' +
+      '</div>' +
+      '<div class="dtw-p-body">' +
+      '<div class="dtw-hero"><img src="dtw-preview.png" alt="Tampilan fitur Daya Tampung Wilayah"></div>' +
+      '<div class="dtw-steps">' +
+      step("1", "Tandai batas wilayah", "Unggah SHP/GeoJSON/KML/KMZ, atau gambar sendiri langsung di peta.") +
+      step("2", "Gambar &amp; edit di peta", "Klik titik demi titik, seret untuk memindah, klik titik tengah untuk menambah.") +
+      step("3", "Hitung", "Daya tampung wilayah (ton/tahun) untuk polutan yang dipilih.") +
+      '</div>' +
+      '</div>' +
+      '<div class="dtw-p-foot">' +
+      '<button class="dtw-p-cta">Mulai hitung</button>' +
+      '<button class="dtw-p-later">Nanti saja</button>' +
+      '</div>' +
+      '</div>';
+    document.body.appendChild(m);
+    m.querySelector(".dtw-p-x").addEventListener("click", tutupPamflet);
+    m.querySelector(".dtw-p-later").addEventListener("click", tutupPamflet);
+    m.querySelector(".dtw-p-cta").addEventListener("click", function () {
+      tutupPamflet();
+      var p = document.getElementById("dtw-panel");
+      if (p && !p.classList.contains("open")) togglePanel();
+    });
+    m.addEventListener("click", function (e) { if (e.target === m) tutupPamflet(); });
+  }
+  function bukaPamflet() { var m = document.getElementById("dtw-pamflet"); if (m) m.classList.add("open"); }
+  function tutupPamflet() { var m = document.getElementById("dtw-pamflet"); if (m) m.classList.remove("open"); }
+
   function togglePanel() {
     var p = document.getElementById("dtw-panel"), b = document.getElementById("dtw-toggle");
     if (!p) return;
@@ -511,6 +549,7 @@
     var wrap = document.querySelector(".dtw-wrap"); if (!wrap) return;
     var on = isDT();
     wrap.classList.toggle("dtw-on", on);
+    if (on) bukaPamflet();   // muncul tiap masuk / ganti parameter Daya Tampung (juga tiap refresh)
     if (!on) {
       if (draw.on) batalGambar();
       var p = document.getElementById("dtw-panel"), b = document.getElementById("dtw-toggle");
@@ -604,7 +643,31 @@
       ".dtw-wrap.dtw-on .dtw-callout{display:block}",
       ".dtw-wrap.dtw-on #dtw-toggle.active ~ .dtw-callout{display:none}",
       "@media(max-width:640px){.dtw-callout{display:none!important}}",
-      "@media(prefers-reduced-motion:reduce){.dtw-wrap.dtw-on #dtw-toggle,.dtw-wrap.dtw-on #dtw-toggle::after,.dtw-callout{animation:none}}"
+      "@media(prefers-reduced-motion:reduce){.dtw-wrap.dtw-on #dtw-toggle,.dtw-wrap.dtw-on #dtw-toggle::after,.dtw-callout{animation:none}}",
+      // ---- Pamflet penjelasan (screenshot UI ASLI, neubrutalism SUDUT SIKU) ----
+      ".dtw-modal{position:fixed;inset:0;z-index:1400;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55);padding:16px}",
+      ".dtw-modal.open{display:flex}",
+      ".dtw-card{background:var(--surface,#fff);color:var(--ink,#171a21);border:var(--bw,3px) solid var(--ink,#171a21);",
+      "  box-shadow:var(--shadow,10px 10px 0 rgba(0,0,0,.22));width:min(980px,96vw);max-height:94vh;",
+      "  display:flex;flex-direction:column;overflow:hidden}",
+      ".dtw-p-head{flex:none;padding:15px 50px 12px 22px;border-bottom:var(--bw,3px) solid var(--ink,#171a21);position:relative}",
+      ".dtw-p-eyebrow{font:800 11px 'Space Grotesk',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#e0312e}",
+      ".dtw-p-title{font:800 clamp(18px,2.4vw,25px)/1.1 'Archivo Black',system-ui,sans-serif;margin:6px 0 0;text-wrap:balance}",
+      ".dtw-p-sub{margin:7px 0 0;font-size:13px;color:var(--ink-soft,#4a5262);line-height:1.5;max-width:72ch}",
+      ".dtw-p-x{position:absolute;top:12px;right:12px;width:32px;height:32px;border:2px solid var(--ink,#171a21);background:var(--surface,#fff);font-size:18px;line-height:0;cursor:pointer;color:inherit}",
+      ".dtw-p-x:hover{background:#ffd7d1;color:#c0392b}",
+      ".dtw-p-body{flex:1;overflow-y:auto;padding:16px 22px}",
+      ".dtw-hero{border:2px solid var(--ink,#171a21);overflow:hidden;background:#12161d;line-height:0}",
+      ".dtw-hero img{display:block;width:100%;height:auto}",
+      ".dtw-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:14px}",
+      ".dtw-s{display:flex;gap:9px;align-items:flex-start}",
+      ".dtw-s .n{flex:none;width:24px;height:24px;background:#e0312e;color:#fff;border:2px solid var(--ink,#171a21);font:800 12px 'Archivo Black',system-ui,sans-serif;display:flex;align-items:center;justify-content:center}",
+      ".dtw-s-t{font-weight:700;font-size:12.5px;margin:0 0 1px}.dtw-s-d{font-size:11.5px;color:var(--ink-soft,#4a5262);line-height:1.4;margin:0}",
+      ".dtw-p-foot{flex:none;padding:13px 22px;border-top:var(--bw,3px) solid var(--ink,#171a21);display:flex;gap:10px}",
+      ".dtw-p-cta{flex:1;border:var(--bw,3px) solid var(--ink,#171a21);background:var(--lime,#d2ed26);color:var(--ink,#171a21);font:800 14px 'Space Grotesk',system-ui,sans-serif;padding:11px;cursor:pointer;box-shadow:var(--shadow,4px 4px 0 rgba(0,0,0,.15))}",
+      ".dtw-p-cta:hover{filter:brightness(.96)}",
+      ".dtw-p-later{border:var(--bw,3px) solid var(--ink,#171a21);background:var(--surface,#fff);color:inherit;font:700 14px 'Space Grotesk',system-ui,sans-serif;padding:11px 16px;cursor:pointer}.dtw-p-later:hover{background:#f0f2f5}",
+      "@media(max-width:680px){.dtw-steps{grid-template-columns:1fr}}"
     ].join("\n");
     document.head.appendChild(st);
 
@@ -658,6 +721,7 @@
     document.getElementById("dtw-hapus").addEventListener("click", resetWilayah);
     document.getElementById("dtw-reset").addEventListener("click", resetWilayah);
     document.getElementById("dtw-hitung").addEventListener("click", hitung);
+    bangunPamflet();
 
     // Sambung ke pergantian layer: bungkus setActiveLayer agar syncDTW jalan tiap
     // ganti layer. setActiveLayer fungsi global app.js (classic script), bisa dibungkus.
