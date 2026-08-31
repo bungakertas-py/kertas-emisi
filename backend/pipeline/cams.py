@@ -21,6 +21,12 @@ import config as C
 
 RAW_DIR = C.RAW_DIR
 
+# Server ADS sesekali memulangkan job dengan status "failed" tanpa sebab dari
+# pihak kita. Sekali itu terjadi seluruh deploy mati dan data sehari hilang,
+# padahal mengirim ulang job ke ADS tidak dipungut apa pun.
+COBA_MAKS = 3      # berapa kali job dikirim ulang sebelum benar-benar menyerah
+JEDA_COBA = 60     # detik, jeda sebelum kirim ulang
+
 
 def _token() -> str:
     tok = os.environ.get("ADS_KEY", "").strip()
@@ -89,6 +95,59 @@ def _body(hari: dt.date, jam: str, lead: list[str], variabel: list[str],
     }}
 
 
+class _Sesaat(Exception):
+    """Gagal yang pantas dicoba lagi. Server ADS ngambek, bukan permintaan kita salah."""
+
+
+def _jalankan_job(body: dict, timeout_menit: int) -> bytes:
+    """Kirim satu job ke ADS, tunggu, lalu pulangkan isi zip hasilnya.
+
+    Yang dilempar sebagai _Sesaat cuma kegagalan pihak sana. Permintaan yang
+    memang salah bentuk (HTTP 4xx) dilempar apa adanya supaya tidak diulang
+    tiga kali percuma.
+    """
+    try:
+        r = requests.post(f"{C.CAMS['api']}/retrieve/v1/processes/{C.CAMS['dataset']}/execute",
+                          headers=_hdr(), json=body, timeout=180)
+        if r.status_code >= 500:
+            raise _Sesaat(f"ADS balas HTTP {r.status_code} waktu job dikirim")
+        r.raise_for_status()
+    except requests.RequestException as e:
+        raise _Sesaat(f"koneksi ke ADS putus waktu job dikirim, {type(e).__name__}") from None
+    job = r.json()["jobID"]
+    print(f"  job {job}")
+
+    batas = time.time() + timeout_menit * 60
+    status = ""
+    while time.time() < batas:
+        try:
+            j = requests.get(f"{C.CAMS['api']}/retrieve/v1/jobs/{job}",
+                             headers=_hdr(), timeout=60).json()
+        except requests.RequestException:
+            # Satu kali gagal menanyakan kabar bukan alasan membuang job yang
+            # mungkin sedang jalan. Tunggu lalu tanya lagi sampai batas waktu.
+            time.sleep(10)
+            continue
+        status = j.get("status")
+        if status in ("successful", "failed"):
+            break
+        time.sleep(10)
+    if status == "failed":
+        raise _Sesaat(f"job {job} berakhir dengan status failed di sisi ADS")
+    if status != "successful":
+        # Kehabisan waktu. Job-nya kemungkinan masih mengantre, kirim ulang cuma
+        # menaruh diri di ekor antrean yang sama. Jadi ini TIDAK diulang.
+        raise RuntimeError(
+            f"Job CAMS {job} belum selesai setelah {timeout_menit} menit (status {status or '?'})")
+
+    try:
+        res = requests.get(f"{C.CAMS['api']}/retrieve/v1/jobs/{job}/results",
+                           headers=_hdr(), timeout=60).json()
+        return requests.get(res["asset"]["value"]["href"], timeout=900).content
+    except requests.RequestException as e:
+        raise _Sesaat(f"job {job} sukses tapi unduhannya putus, {type(e).__name__}") from None
+
+
 def fetch(hari: dt.date, jam: str, variabel: list[str], dest: Path | None = None,
           lead: list[str] | None = None, timeout_menit: int = 40,
           model_level: list[str] | None = None) -> Path:
@@ -108,26 +167,19 @@ def fetch(hari: dt.date, jam: str, variabel: list[str], dest: Path | None = None
         print(f"  pakai unduhan lama: {dest.name} ({dest.stat().st_size/1e6:.1f} MB)")
         return dest
     body = _body(hari, jam, lead, variabel, model_level)
-    r = requests.post(f"{C.CAMS['api']}/retrieve/v1/processes/{C.CAMS['dataset']}/execute",
-                      headers=_hdr(), json=body, timeout=180)
-    r.raise_for_status()
-    job = r.json()["jobID"]
-    print(f"  job {job}, {len(variabel)} variabel x {len(lead)} langkah")
-
-    batas = time.time() + timeout_menit * 60
-    status = ""
-    while time.time() < batas:
-        j = requests.get(f"{C.CAMS['api']}/retrieve/v1/jobs/{job}", headers=_hdr(), timeout=60).json()
-        status = j.get("status")
-        if status in ("successful", "failed"):
+    print(f"  {len(variabel)} variabel x {len(lead)} langkah")
+    blob = None
+    for percobaan in range(1, COBA_MAKS + 1):
+        try:
+            blob = _jalankan_job(body, timeout_menit)
             break
-        time.sleep(10)
-    if status != "successful":
-        raise RuntimeError(f"Job CAMS {job} berakhir dengan status {status}")
-
-    res = requests.get(f"{C.CAMS['api']}/retrieve/v1/jobs/{job}/results", headers=_hdr(), timeout=60).json()
-    url = res["asset"]["value"]["href"]
-    blob = requests.get(url, timeout=900).content
+        except _Sesaat as e:
+            if percobaan == COBA_MAKS:
+                raise RuntimeError(
+                    f"Job CAMS gagal {COBA_MAKS} kali berturut-turut. Terakhir: {e}") from None
+            print(f"  {e}")
+            print(f"  tunggu {JEDA_COBA} detik, lalu kirim ulang ({percobaan + 1}/{COBA_MAKS})")
+            time.sleep(JEDA_COBA)
     # Balasannya zip berisi satu berkas nc. Dibuka ke berkas tunggal biar mudah dibaca.
     with zipfile.ZipFile(io.BytesIO(blob)) as z:
         nama = z.namelist()[0]
