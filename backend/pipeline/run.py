@@ -169,17 +169,21 @@ def _run_paksa():
 
 
 def main() -> None:
-    hari, jam_run = _run_paksa() or cams.latest_available_run()
-    run = dt.datetime.combine(hari, dt.time(int(jam_run[:2])), tzinfo=dt.timezone.utc)
-    print(f"Run CAMS terpilih: {run:%Y-%m-%d %H}Z")
-
     single = [v["cams_var"] for v in LAYERS.values() if v["src"] == "single"]
     model = [v["cams_var"] for v in LAYERS.values() if v["src"] == "model"]
+    sfc = single + [C.WIND["cams_u"], C.WIND["cams_v"]] + C.UDARA["cams"]
+
+    # Daftar variabel permukaan diserahkan ke penjajak run supaya yang diuji itu
+    # persis permintaan yang nanti dikirim, cuma langkah terakhirnya saja. Run yang
+    # baru separuh terbit jadi ketahuan di sini, bukan setelah lima menit.
+    hari, jam_run = _run_paksa() or cams.latest_available_run(sfc)
+    run = dt.datetime.combine(hari, dt.time(int(jam_run[:2])), tzinfo=dt.timezone.utc)
+    print(f"Run CAMS terpilih: {run:%Y-%m-%d %H}Z")
 
     # DUA permintaan terpisah. Variabel permukaan dan variabel 3D tak bisa digabung,
     # yang 3D butuh model_level dan ADS menolak kalau dicampur.
     print("\n[1/2] variabel permukaan + angin + suhu/tekanan")
-    nc_s = cams.fetch(hari, jam_run, single + [C.WIND["cams_u"], C.WIND["cams_v"]] + C.UDARA["cams"],
+    nc_s = cams.fetch(hari, jam_run, sfc,
                       dest=C.RAW_DIR / f"cams_sfc_{hari:%Y%m%d}_{jam_run[:2]}.nc")
     print("[2/2] gas di model_level 137 (lapisan paling bawah)")
     nc_m = cams.fetch(hari, jam_run, model, dest=C.RAW_DIR / f"cams_ml_{hari:%Y%m%d}_{jam_run[:2]}.nc",
